@@ -1,0 +1,1 @@
+A browser-based application that I built to help create a weekly schedule for student employees. The application was built as a single-file React application, and handles scheduling logic, a weekly hours cap for each student employee (28 hours per week), and has some built-in intelligent auto shift assignment to help balance hours across all student employees. 
