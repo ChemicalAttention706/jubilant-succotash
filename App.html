@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Shift Scheduler</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    
+    <script>
+        try {
+            if (localStorage.getItem('scheduler_dark_mode') === 'true') {
+                document.documentElement.classList.add('dark');
+            }
+        } catch (e) {}
+    </script>
+
+    <style>
+        /* Base transition for smooth toggling */
+        body { font-family: sans-serif; transition: background-color 0.3s, color 0.3s; }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Constants & Initial Data ---
+        const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const SHIFT_TYPES = [
+            { id: 'morning', name: '7am-1pm', hours: 6 },
+            { id: 'afternoon', name: '1pm-7pm', hours: 6 },
+            { id: 'evening', name: '7pm-12am', hours: 5 }
+        ];
+        
+        const initialStudents = Array.from({ length: 15 }, (_, i) => ({
+            id: i + 1,
+            name: `Student ${i + 1}`,
+            hours: 0,
+            shifts: 0,
+            unavailable: [] 
+        }));
+
+        const App = () => {
+            const fileInputRef = useRef(null);
+
+            // --- Safe LocalStorage Initialization ---
+            const [isDarkMode, setIsDarkMode] = useState(() => {
+                try {
+                    const saved = localStorage.getItem('scheduler_dark_mode');
+                    return saved ? JSON.parse(saved) : false;
+                } catch (e) {
+                    return false;
+                }
+            });
+
+            const [students, setStudents] = useState(() => {
+                try {
+                    const saved = localStorage.getItem('scheduler_students');
+                    return saved ? JSON.parse(saved) : initialStudents;
+                } catch (e) {
+                    console.warn("Corrupted student data in local storage. Falling back to defaults.");
+                    return initialStudents;
+                }
+            });
+            const [targets, setTargets] = useState(() => {
+                try {
+                    const saved = localStorage.getItem('scheduler_targets');
+                    return saved ? JSON.parse(saved) : { morning: 2, afternoon: 2, evening: 2 };
+                } catch (e) {
+                    return { morning: 2, afternoon: 2, evening: 2 };
+                }
+            });
+            const [schedule, setSchedule] = useState(() => {
+                try {
+                    const saved = localStorage.getItem('scheduler_schedule');
+                    return saved ? JSON.parse(saved) : {}; 
+                } catch (e) {
+                    return {};
+                }
+            });
+            const [newStudentName, setNewStudentName] = useState(""); 
+            const [editingStudentId, setEditingStudentId] = useState(null); 
+
+            // --- Effects for LocalStorage & Dark Mode ---
+            useEffect(() => {
+                localStorage.setItem('scheduler_dark_mode', JSON.stringify(isDarkMode));
+                if (isDarkMode) {
+                    document.documentElement.classList.add('dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                }
+            }, [isDarkMode]);
+
+            useEffect(() => {
+                localStorage.setItem('scheduler_students', JSON.stringify(students));
+            }, [students]);
+
+            useEffect(() => {
+                localStorage.setItem('scheduler_targets', JSON.stringify(targets));
+            }, [targets]);
+
+            useEffect(() => {
+                localStorage.setItem('scheduler_schedule', JSON.stringify(schedule));
+            }, [schedule]);
+
+            // --- Helper: Get student totals ---
+            const getStudentStats = () => {
+                const stats = {};
+                students.forEach(s => stats[s.id] = { ...s, hours: 0, shifts: 0 });
+                
+                Object.entries(schedule).forEach(([slotId, assignedIds]) => {
+                    const shiftTypeId = slotId.split('-')[1];
+                    const shiftType = SHIFT_TYPES.find(s => s.id === shiftTypeId);
+                    const shiftHours = shiftType ? shiftType.hours : 0; 
+                    
+                    assignedIds.forEach(id => {
+                        if (stats[id]) {
+                            stats[id].hours += shiftHours;
+                            stats[id].shifts += 1;
+                        }
+                    });
+                });
+                return stats;
+            };
+
+            const studentStats = getStudentStats();
+            const editingStudent = students.find(s => s.id === editingStudentId);
+
+            // --- Import / Export Availability Logic ---
+            const downloadTemplate = () => {
+                const header = "Name,Unavailable 1,Unavailable 2,Unavailable 3\n";
+                const row1 = "\"Smith, John\",Monday-morning,Tuesday-afternoon,Friday-evening\n";
+                const row2 = "Another Student,Wednesday-morning,,\n";
+                const blob = new Blob([header + row1 + row2], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = "availability_template.csv";
+                link.click();
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const text = event.target.result;
+                    const lines = text.split('\n').filter(line => line.trim() !== '');
+                    
+                    const newStudents = lines.slice(1).map((line, index) => {
+                        const columns = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(col => col.trim().replace(/^"|"$/g, ''));
+                        const name = columns[0];
+                        const unavailable = columns.slice(1).filter(val => val !== ""); 
+                        
+                        return {
+                            id: Date.now() + index, 
+                            name,
+                            hours: 0,
+                            shifts: 0,
+                            unavailable
+                        };
+                    }).filter(s => s.name); 
+
+                    if (newStudents.length > 0) {
+                        if(confirm(`Successfully read ${newStudents.length} students. Import them and replace your current roster? (This clears the schedule)`)) {
+                            setStudents(newStudents);
+                            setSchedule({});
+                        }
+                    } else {
+                        alert("Could not find any valid student data in the CSV.");
+                    }
+                    e.target.value = '';
+                };
+                reader.readAsText(file);
+            };
+
+            // --- Toggle Availability Logic (For Modal) ---
+            const toggleAvailability = (studentId, slotId) => {
+                const student = students.find(s => s.id === studentId);
+                if (!student) return;
+                
+                // PATCH 3: Safe optional chaining for `.toLowerCase()`
+                const isCurrentlyUnavailable = (student.unavailable || []).some(u => u?.toLowerCase() === slotId?.toLowerCase());
+                
+                setStudents(students.map(s => {
+                    if (s.id === studentId) {
+                        if (isCurrentlyUnavailable) {
+                            return { ...s, unavailable: (s.unavailable || []).filter(u => u?.toLowerCase() !== slotId?.toLowerCase()) }; 
+                        } else {
+                            return { ...s, unavailable: [...(s.unavailable || []), slotId] }; 
+                        }
+                    }
+                    return s;
+                }));
+                
+                if (!isCurrentlyUnavailable) {
+                    const currentShiftAssigned = schedule[slotId] || [];
+                    if (currentShiftAssigned.includes(studentId)) {
+                        setSchedule({
+                            ...schedule,
+                            [slotId]: currentShiftAssigned.filter(id => id !== studentId)
+                        });
+                    }
+                }
+            };
+
+            // --- Auto-Assign Logic ---
+            const handleAutoAssign = () => {
+                let newSchedule = { ...schedule };
+                let currentStats = { ...studentStats };
+                
+                let allSlotsToFill = [];
+                DAYS.forEach(day => {
+                    SHIFT_TYPES.forEach(shift => {
+                        const slotId = `${day}-${shift.id}`;
+                        const currentAssigned = newSchedule[slotId] || [];
+                        const needed = targets[shift.id] - currentAssigned.length;
+                        
+                        for (let i = 0; i < needed; i++) {
+                            allSlotsToFill.push({ day, shiftId: shift.id, slotId, hours: shift.hours });
+                        }
+                    });
+                });
+
+                allSlotsToFill = allSlotsToFill.sort(() => Math.random() - 0.5);
+
+                allSlotsToFill.forEach(slot => {
+                    let eligible = students.filter(s => {
+                        const stats = currentStats[s.id];
+                        if (!stats) return false;
+                        
+                        const wouldExceedHours = stats.hours + slot.hours > 28;
+                        const alreadyInShift = (newSchedule[slot.slotId] || []).includes(s.id);
+                        
+                        // PATCH 3: Safe optional chaining
+                        const isUnavailable = (s.unavailable || []).some(u => u?.toLowerCase() === slot.slotId?.toLowerCase()); 
+                        
+                        const workingToday = SHIFT_TYPES.some(shiftType => {
+                            const daySlotId = `${slot.day}-${shiftType.id}`;
+                            return (newSchedule[daySlotId] || []).includes(s.id);
+                        });
+                        
+                        return !wouldExceedHours && !alreadyInShift && !isUnavailable && !workingToday;
+                    });
+
+                    if (eligible.length > 0) {
+                        eligible.sort((a, b) => {
+                            const statsA = currentStats[a.id];
+                            const statsB = currentStats[b.id];
+                            
+                            if (statsA.shifts !== statsB.shifts) return statsA.shifts - statsB.shifts;
+                            if (statsA.hours !== statsB.hours) return statsA.hours - statsB.hours;
+                            return Math.random() - 0.5;
+                        });
+
+                        const selected = eligible[0];
+                        newSchedule[slot.slotId] = [...(newSchedule[slot.slotId] || []), selected.id];
+                        
+                        currentStats[selected.id].shifts += 1;
+                        currentStats[selected.id].hours += slot.hours;
+                    }
+                });
+
+                setSchedule(newSchedule);
+            };
+
+            // --- CSV Export Logic ---
+            const exportCSV = () => {
+                const rows = [];
+                // Helper to escape internal quotes
+                const escapeCSV = (str) => String(str).replace(/"/g, '""');
+                
+                rows.push(["Day", "Shift", "Assigned Students"]);
+                DAYS.forEach(day => {
+                    SHIFT_TYPES.forEach(shift => {
+                        const slotId = `${day}-${shift.id}`;
+                        const assignedIds = schedule[slotId] || [];
+                        const studentNames = assignedIds.map(id => {
+                            const student = students.find(s => s.id === id);
+                            return student ? student.name : "";
+                        }).join(", ");
+                        
+                        // PATCH 2: Fully escaped CSV string builder
+                        rows.push([day, shift.name, `"${escapeCSV(studentNames)}"`]);
+                    });
+                });
+
+                rows.push([]);
+                rows.push([]);
+
+                rows.push(["Student Name", "Total Hours", "Total Shifts", "Unavailable Slots"]);
+                students.forEach(student => {
+                    const stats = studentStats[student.id];
+                    const unavailableStr = (student.unavailable || []).join(", ");
+                    // PATCH 2: Fully escaped CSV string builder
+                    rows.push([`"${escapeCSV(student.name)}"`, stats.hours, stats.shifts, `"${escapeCSV(unavailableStr)}"`]);
+                });
+
+                const csvContent = rows.map(r => r.join(",")).join("\n");
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", "student_schedule.csv");
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            // --- UI Handlers ---
+            const removeStudent = (id) => {
+                if(confirm("Remove this student from the roster entirely?")) {
+                    setStudents(students.filter(s => s.id !== id));
+                    const newSchedule = {};
+                    Object.entries(schedule).forEach(([slot, ids]) => {
+                        newSchedule[slot] = ids.filter(studentId => studentId !== id);
+                    });
+                    setSchedule(newSchedule);
+                }
+            };
+
+            const addStudent = (e) => {
+                e.preventDefault();
+                if (!newStudentName.trim()) return;
+                
+                const newStudent = {
+                    id: Date.now(), 
+                    name: newStudentName.trim(),
+                    hours: 0,
+                    shifts: 0,
+                    unavailable: []
+                };
+                
+                setStudents([...students, newStudent]);
+                setNewStudentName(""); 
+            };
+
+            const clearSchedule = () => {
+                if(confirm("Are you sure you want to clear the current schedule?")) {
+                    setSchedule({});
+                }
+            };
+            
+            const clearAllStudents = () => {
+                if(confirm("Are you sure you want to delete all students from the roster?")) {
+                    setStudents([]);
+                    setSchedule({});
+                }
+            };
+
+            const resetToDefault = () => {
+                if(confirm("Reset everything to default testing data? This will erase your current roster and schedule.")) {
+                    setStudents(initialStudents);
+                    setTargets({ morning: 2, afternoon: 2, evening: 2 });
+                    setSchedule({});
+                }
+            }
+
+            return (
+                <div className="p-6 max-w-[1400px] mx-auto space-y-6 relative transition-colors duration-300">
+                    {/* Header & Stats */}
+                    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border border-transparent dark:border-gray-700">
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-3">
+                                Student Shift Scheduler
+                            </h1>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
+                                Max 28 hours per week per student • <span className="text-green-600 dark:text-green-400 font-medium">Auto-saving enabled</span>
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            {/* Dark Mode Toggle */}
+                            <button 
+                                onClick={() => setIsDarkMode(!isDarkMode)} 
+                                className="p-2 border border-gray-200 dark:border-gray-600 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                title="Toggle Dark Mode"
+                            >
+                                {isDarkMode ? '☀️' : '🌙'}
+                            </button>
+                            <div className="w-px h-8 bg-gray-200 dark:bg-gray-600 mx-1"></div>
+                            
+                            <button onClick={resetToDefault} className="px-3 py-2 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-sm transition-colors">Reset All</button>
+                            <button onClick={clearSchedule} className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm transition-colors">Clear Schedule</button>
+                            <button onClick={exportCSV} className="px-3 py-2 border border-green-600 dark:border-green-500 text-green-700 dark:text-green-400 rounded hover:bg-green-50 dark:hover:bg-green-900/20 text-sm transition-colors">📥 Export</button>
+                            <button onClick={handleAutoAssign} className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 font-medium text-sm transition-colors shadow-sm">✨ Auto-Assign</button>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col lg:flex-row gap-6">
+                        {/* Main Grid */}
+                        <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow overflow-x-auto border border-transparent dark:border-gray-700">
+                            <table className="w-full text-left border-collapse min-w-[800px]">
+                                <thead>
+                                    <tr>
+                                        <th className="p-3 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300">Shift</th>
+                                        {DAYS.map(day => <th key={day} className="p-3 border-b border-l dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 font-medium text-gray-700 dark:text-gray-300">{day}</th>)}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {SHIFT_TYPES.map(shift => (
+                                        <tr key={shift.id}>
+                                            <td className="p-3 border-b dark:border-gray-700 whitespace-nowrap bg-gray-50/50 dark:bg-gray-800/30">
+                                                <div className="font-semibold text-gray-800 dark:text-gray-200">{shift.name}</div>
+                                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Target: {targets[shift.id] || 0}</div>
+                                            </td>
+                                            {DAYS.map(day => {
+                                                const slotId = `${day}-${shift.id}`;
+                                                const assigned = schedule[slotId] || [];
+                                                // Default to 0 if undefined targets exist
+                                                const isMet = assigned.length >= (targets[shift.id] || 0);
+                                                
+                                                return (
+                                                    <td key={slotId} className={`p-2 border-b border-l dark:border-gray-700 min-w-[160px] align-top transition-colors ${isMet && (targets[shift.id] || 0) > 0 ? 'bg-green-50/50 dark:bg-green-900/10' : ''}`}>
+                                                        <div className="flex flex-col gap-1.5">
+                                                            {/* Assigned Students */}
+                                                            {assigned.map(studentId => {
+                                                                const student = students.find(s => s.id === studentId);
+                                                                if(!student) return null;
+                                                                return (
+                                                                    <div key={studentId} className="bg-white dark:bg-gray-700 border dark:border-gray-600 rounded px-2 py-1.5 text-sm shadow-sm flex justify-between items-center group">
+                                                                        <span className="truncate pr-2 dark:text-gray-200">{student.name}</span>
+                                                                        <button 
+                                                                            onClick={() => setSchedule({...schedule, [slotId]: assigned.filter(id => id !== studentId)})}
+                                                                            className="text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                                                                            title="Remove from shift"
+                                                                        >✕</button>
+                                                                    </div>
+                                                                )
+                                                            })}
+                                                            
+                                                            {/* Manual Add Dropdown */}
+                                                            <select 
+                                                                className="text-xs border dark:border-gray-600 rounded p-1.5 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-600 cursor-pointer text-gray-700 dark:text-gray-300 outline-none w-full transition-colors"
+                                                                value={""}
+                                                                onChange={(e) => {
+                                                                    if (!e.target.value) return;
+                                                                    const newStudentId = parseInt(e.target.value);
+                                                                    setSchedule({...schedule, [slotId]: [...assigned, newStudentId]});
+                                                                    e.target.value = ""; 
+                                                                }}
+                                                            >
+                                                                <option value="">➕ Add...</option>
+                                                                {students
+                                                                    .filter(s => !assigned.includes(s.id)) 
+                                                                    .map(s => {
+                                                                        const stats = studentStats[s.id];
+                                                                        const wouldExceed = stats.hours + shift.hours > 28;
+                                                                        
+                                                                        // PATCH 3: Safe optional chaining
+                                                                        const isUnavailable = (s.unavailable || []).some(u => u?.toLowerCase() === slotId?.toLowerCase());
+                                                                        
+                                                                        const workingToday = SHIFT_TYPES.some(shiftType => {
+                                                                            const daySlotId = `${day}-${shiftType.id}`;
+                                                                            return (schedule[daySlotId] || []).includes(s.id);
+                                                                        });
+                                                                        
+                                                                        return (
+                                                                            <option key={s.id} value={s.id} disabled={wouldExceed || isUnavailable || workingToday} className="dark:bg-gray-800">
+                                                                                {s.name} ({stats.hours}h) 
+                                                                                {wouldExceed ? ' - Max Hours' : ''}
+                                                                                {isUnavailable ? ' - Unavailable' : ''}
+                                                                                {workingToday ? ' - Working Today' : ''}
+                                                                            </option>
+                                                                        )
+                                                                    })
+                                                                }
+                                                            </select>
+                                                        </div>
+                                                    </td>
+                                                )
+                                            })}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Side Panels */}
+                        <div className="w-full lg:w-80 space-y-6 flex-shrink-0">
+                            {/* Import Availability Module */}
+                            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow border border-transparent dark:border-gray-700">
+                                <h3 className="font-semibold border-b dark:border-gray-700 pb-2 mb-3 dark:text-gray-100">Staff Availability</h3>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Upload a CSV or click "Edit" next to a student's name in the roster below to block out off-times.</p>
+                                <div className="flex gap-2 mb-2">
+                                    <button onClick={downloadTemplate} className="w-1/2 px-2 py-1.5 border dark:border-gray-600 rounded text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">1. Get Template</button>
+                                    <button onClick={() => fileInputRef.current.click()} className="w-1/2 px-2 py-1.5 bg-gray-800 dark:bg-gray-700 text-white rounded text-xs hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors">2. Upload CSV</button>
+                                    <input 
+                                        type="file" 
+                                        accept=".csv" 
+                                        className="hidden" 
+                                        ref={fileInputRef}
+                                        onChange={handleFileUpload} 
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Shift Targets */}
+                            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow border border-transparent dark:border-gray-700">
+                                <h3 className="font-semibold border-b dark:border-gray-700 pb-2 mb-3 dark:text-gray-100">Shift Staffing Targets</h3>
+                                {SHIFT_TYPES.map(shift => (
+                                    <div key={shift.id} className="flex justify-between items-center mb-2">
+                                        <label className="text-sm dark:text-gray-300">{shift.name}</label>
+                                        <input 
+                                            type="number" 
+                                            min="0"
+                                            /* PATCH 1: Fallback for uncontrolled component */
+                                            value={targets[shift.id] || 0}
+                                            onChange={(e) => setTargets({...targets, [shift.id]: parseInt(e.target.value) || 0})}
+                                            className="w-16 border dark:border-gray-600 rounded p-1 text-center bg-white dark:bg-gray-700 dark:text-gray-100 outline-none focus:border-blue-500 dark:focus:border-blue-400"
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Roster & Hours Tracking */}
+                            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow h-[400px] flex flex-col border border-transparent dark:border-gray-700">
+                                <div className="flex justify-between items-center border-b dark:border-gray-700 pb-2 mb-3">
+                                    <h3 className="font-semibold dark:text-gray-100">Roster & Hours ({students.length})</h3>
+                                    <button onClick={clearAllStudents} className="text-xs text-red-500 dark:text-red-400 hover:underline">Clear Roster</button>
+                                </div>
+                                
+                                {/* Add New Student Form */}
+                                <form onSubmit={addStudent} className="flex gap-2 mb-3">
+                                    <input 
+                                        type="text" 
+                                        value={newStudentName}
+                                        onChange={(e) => setNewStudentName(e.target.value)}
+                                        placeholder="Quick add student..."
+                                        className="flex-1 border dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-gray-100 rounded p-1.5 text-sm outline-none focus:border-blue-500 dark:focus:border-blue-400 placeholder-gray-400 dark:placeholder-gray-500"
+                                    />
+                                    <button type="submit" className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 border dark:border-gray-600 rounded text-sm font-medium dark:text-gray-200 transition-colors">Add</button>
+                                </form>
+
+                                <div className="overflow-y-auto flex-1 space-y-2 pr-2">
+                                    {students.map(student => {
+                                        const stats = studentStats[student.id];
+                                        const isWarning = stats.hours >= 28;
+                                        const unavailCount = (student.unavailable || []).length;
+
+                                        return (
+                                            <div key={student.id} className={`flex flex-col p-2 rounded border transition-colors ${
+                                                isWarning 
+                                                ? 'bg-amber-50 border-amber-300 dark:bg-amber-900/20 dark:border-amber-700/50' 
+                                                : 'bg-gray-50 border-gray-200 dark:bg-gray-700/50 dark:border-gray-600'
+                                            }`}>
+                                                <div className="flex justify-between items-start">
+                                                    <div>
+                                                        <div className="font-medium text-sm text-gray-800 dark:text-gray-200 flex items-center gap-2">
+                                                            {student.name}
+                                                            {unavailCount > 0 && (
+                                                                <span className="text-[10px] bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 px-1.5 py-0.5 rounded-full" title={`${unavailCount} unavailable shifts`}>
+                                                                    {unavailCount} off
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className={`text-xs mt-0.5 ${isWarning ? 'text-amber-700 dark:text-amber-500 font-bold' : 'text-gray-500 dark:text-gray-400'}`}>
+                                                            {stats.hours} / 28 hrs
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => setEditingStudentId(student.id)} className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors">Edit</button>
+                                                        <button onClick={() => removeStudent(student.id)} className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors" title="Delete Student">✕</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                    {students.length === 0 && (
+                                        <div className="text-center text-gray-400 dark:text-gray-500 text-sm mt-4 italic">No students in roster.</div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Availability Editor Modal */}
+                    {editingStudent && (
+                        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-700">
+                                <div className="flex justify-between items-center mb-1">
+                                    <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Edit Availability: {editingStudent.name}</h2>
+                                    <button onClick={() => setEditingStudentId(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xl font-bold transition-colors">✕</button>
+                                </div>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Click on shifts to toggle whether this student is available to work them.</p>
+                                
+                                <div className="overflow-x-auto border dark:border-gray-700 rounded-lg shadow-sm">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-gray-50 dark:bg-gray-800/50">
+                                            <tr>
+                                                <th className="p-3 font-medium text-gray-600 dark:text-gray-300 border-b dark:border-gray-700">Shift Time</th>
+                                                {DAYS.map(day => <th key={day} className="p-3 font-medium text-center text-gray-600 dark:text-gray-300 border-b border-l dark:border-gray-700">{day.slice(0,3)}</th>)}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {SHIFT_TYPES.map(shift => (
+                                                <tr key={shift.id} className="border-b dark:border-gray-700 last:border-0">
+                                                    <td className="p-3 font-medium text-gray-800 dark:text-gray-200 whitespace-nowrap bg-gray-50/50 dark:bg-gray-800/30">
+                                                        {shift.name}
+                                                    </td>
+                                                    {DAYS.map(day => {
+                                                        const slotId = `${day}-${shift.id}`;
+                                                        // PATCH 3: Safe optional chaining
+                                                        const isUnavailable = (editingStudent.unavailable || []).some(u => u?.toLowerCase() === slotId?.toLowerCase());
+                                                        
+                                                        return (
+                                                            <td key={slotId} className="p-2 border-l dark:border-gray-700 text-center align-middle bg-white dark:bg-gray-800">
+                                                                <button
+                                                                    onClick={() => toggleAvailability(editingStudent.id, slotId)}
+                                                                    className={`w-full py-2 rounded text-xs font-medium transition-all duration-200 ${
+                                                                        isUnavailable 
+                                                                        ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800/50 hover:bg-red-100 dark:hover:bg-red-900/40 shadow-inner' 
+                                                                        : 'bg-white dark:bg-gray-700 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800/50 hover:bg-green-50 dark:hover:bg-green-900/20 hover:border-green-300 dark:hover:border-green-700 shadow-sm'
+                                                                    }`}
+                                                                >
+                                                                    {isUnavailable ? 'Off' : 'OK'}
+                                                                </button>
+                                                            </td>
+                                                        )
+                                                    })}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                
+                                <div className="mt-6 flex justify-end gap-3">
+                                    <button onClick={() => setEditingStudentId(null)} className="px-6 py-2 bg-gray-800 dark:bg-gray-700 text-white font-medium rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors shadow-sm">
+                                        Done
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
