@@ -154,6 +154,8 @@
             const [editingStudentId, setEditingStudentId] = useState(null); 
             
             const [confirmDialog, setConfirmDialog] = useState(null);
+            const [infoDialog, setInfoDialog] = useState(null);
+            const [openDropdown, setOpenDropdown] = useState(null);
 
             const schedule = schedules[currentWeek] || {};
 
@@ -167,6 +169,10 @@
 
             const promptConfirm = (title, message, actionText, actionFn, isDestructive = true) => {
                 setConfirmDialog({ title, message, actionText, actionFn, isDestructive });
+            };
+
+            const promptInfo = (title, message) => {
+                setInfoDialog({ title, message });
             };
 
             const handleDeleteStudent = (idToRemove) => {
@@ -429,7 +435,7 @@
                     try {
                         const text = event.target.result;
                         const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
-                        const headers = lines[0].split(',').map(h => h.trim());
+                        const headers = lines[0].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(h => h.trim().replace(/^"|"$/g, ''));
                         
                         const newStudents = lines.slice(1).map((line, index) => {
                             const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.trim().replace(/^"|"$/g, ''));
@@ -464,7 +470,7 @@
                             );
                         }
                     } catch (error) {
-                        alert("Error parsing CSV. Please ensure the file follows the template format.");
+                        promptInfo("Error", "Error parsing CSV. Please ensure the file follows the template format.");
                     } finally {
                         if (fileInputRef.current) fileInputRef.current.value = ''; 
                     }
@@ -514,6 +520,11 @@
                                 else cellBg = 'bg-orange-50/40 dark:bg-orange-900/10'; 
                             }
 
+                            const eligibleStudents = students.filter(s => 
+                                !assigned.includes(s.id) && 
+                                (isCoord ? s.role === 'COORDINATOR' : s.role === 'GENERAL')
+                            );
+
                             return (
                                 <td key={slotId} className={`p-2 border-b border-l border-gray-300 dark:border-gray-700 min-w-[170px] align-top transition-colors ${cellBg}`}>
                                     <div className="flex flex-col gap-1.5">
@@ -538,43 +549,59 @@
                                                 </div>
                                             )
                                         })}
-                                        <select 
-                                            className="text-xs border border-gray-300 dark:border-gray-600 rounded p-1.5 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 outline-none w-full"
-                                            defaultValue=""
-                                            onChange={(e) => {
-                                                if (!e.target.value) return;
-                                                updateCurrentSchedule({...schedule, [slotId]: [...assigned, parseInt(e.target.value, 10)]});
-                                                e.target.value = "";
-                                            }}
-                                        >
-                                            <option value="">➕ Add...</option>
-                                            {students.filter(s => 
-                                                !assigned.includes(s.id) && 
-                                                (isCoord ? s.role === 'COORDINATOR' : s.role === 'GENERAL')
-                                            ).map(s => {
-                                                const stats = studentStats[s.id];
-                                                const wouldExceed = stats.currentHours + shift.hours > settings.maxHours;
-                                                const isUnavailable = (s.unavailable || []).includes(slotId);
-                                                const hardOverlap = isHardOverlap(day, s.id, shift.id, schedule);
-                                                const clopening = isClopening(day, s.id, shift.id, schedule, prevWeekSchedule, nextWeekSchedule);
-                                                const b2b = isBackToBack(day, s.id, shift.id, schedule);
-                                                const overDays = isTooManyConsecutiveDays(day, s.id, s.role, schedule, schedules, currentWeek);
-                                                
-                                                let flag = "";
-                                                if(wouldExceed) flag = " (Max Hrs)";
-                                                if(isUnavailable) flag = " (Off)";
-                                                if(hardOverlap) flag = " (Overlap)";
-                                                if(clopening) flag = " (Clopen)";
-                                                if(overDays) flag = " (>3 Days)";
-                                                if(b2b && !wouldExceed && !isUnavailable && !hardOverlap && !clopening && !overDays) flag = " ⚠️ (B2B)";
+                                        
+                                        <div className="relative">
+                                            <button 
+                                                onClick={() => setOpenDropdown(openDropdown === slotId ? null : slotId)}
+                                                className="text-xs text-left border border-gray-300 dark:border-gray-600 rounded p-1.5 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 outline-none w-full hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex justify-between items-center"
+                                            >
+                                                <span>➕ Add...</span>
+                                                <span className="text-[10px] opacity-50">▼</span>
+                                            </button>
+                                            
+                                            {openDropdown === slotId && (
+                                                <>
+                                                    <div className="fixed inset-0 z-30" onClick={() => setOpenDropdown(null)}></div>
+                                                    <div className="absolute top-full left-0 mt-1 min-w-[200px] w-full max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-xl z-40">
+                                                        {eligibleStudents.length === 0 ? (
+                                                            <div className="p-2 text-xs text-gray-500 italic text-center">No available staff</div>
+                                                        ) : eligibleStudents.map(s => {
+                                                            const stats = studentStats[s.id];
+                                                            const wouldExceed = stats.currentHours + shift.hours > settings.maxHours;
+                                                            const isUnavailable = (s.unavailable || []).includes(slotId);
+                                                            const hardOverlap = isHardOverlap(day, s.id, shift.id, schedule);
+                                                            const clopening = isClopening(day, s.id, shift.id, schedule, prevWeekSchedule, nextWeekSchedule);
+                                                            const b2b = isBackToBack(day, s.id, shift.id, schedule);
+                                                            const overDays = isTooManyConsecutiveDays(day, s.id, s.role, schedule, schedules, currentWeek);
+                                                            
+                                                            let flag = "";
+                                                            if(wouldExceed) flag = " (Max Hrs)";
+                                                            if(isUnavailable) flag = " (Off)";
+                                                            if(hardOverlap) flag = " (Overlap)";
+                                                            if(clopening) flag = " (Clopen)";
+                                                            if(overDays) flag = " (>3 Days)";
+                                                            if(b2b && !wouldExceed && !isUnavailable && !hardOverlap && !clopening && !overDays) flag = " ⚠️ (B2B)";
 
-                                                return (
-                                                    <option key={s.id} value={s.id} disabled={wouldExceed || isUnavailable || hardOverlap || clopening || overDays} className={`dark:bg-gray-800 ${b2b ? 'text-red-500 font-bold' : ''}`}>
-                                                        {s.name} ({stats.currentHours}h){flag}
-                                                    </option>
-                                                )
-                                            })}
-                                        </select>
+                                                            const isDisabled = wouldExceed || isUnavailable || hardOverlap || clopening || overDays;
+
+                                                            return (
+                                                                <button 
+                                                                    key={s.id} 
+                                                                    disabled={isDisabled}
+                                                                    onClick={() => {
+                                                                        updateCurrentSchedule({...schedule, [slotId]: [...assigned, s.id]});
+                                                                        setOpenDropdown(null);
+                                                                    }}
+                                                                    className={`w-full text-left p-2 text-xs border-b last:border-b-0 border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${isDisabled ? 'opacity-50 cursor-not-allowed bg-gray-50 dark:bg-gray-900/50 text-gray-500' : (b2b ? 'text-red-600 dark:text-red-400 font-bold' : 'text-gray-800 dark:text-gray-200')}`}
+                                                                >
+                                                                    {s.name} ({stats.currentHours}h){flag}
+                                                                </button>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 </td>
                             )
@@ -670,11 +697,11 @@
                                             e.preventDefault(); 
                                             const trimmedName = newStudentName.trim();
                                             if (!trimmedName) {
-                                                alert("Please enter a valid student name.");
+                                                promptInfo("Invalid Input", "Please enter a valid student name.");
                                                 return;
                                             }
                                             if (students.some(s => s.name.toLowerCase() === trimmedName.toLowerCase())) {
-                                                alert("A student with this name already exists.");
+                                                promptInfo("Duplicate Name", "A student with this name already exists.");
                                                 return;
                                             }
                                             setStudents([...students, { id: Date.now(), name: trimmedName, role: newStudentRole, unavailable: [] }]); 
@@ -772,7 +799,10 @@
                                 {activeTab === 'settings' && (
                                     <div className="space-y-4">
                                         <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 p-3 rounded text-sm text-yellow-800 dark:text-yellow-300 mb-4">
-                                            Adjust these variables to modify the Auto-Assigner's logic constraints.
+                                            Adjust these variables to modify the Auto-Assigner's logic constraints.<br/><br/>
+                                            <strong>New Rules Added:</strong><br/>
+                                            • The Auto-Assigner blocks Back-to-Back (B2B) shifts, but they can be manually added via dropdown override (marked with a ⚠️).<br/>
+                                            • General Staff are strictly blocked from working > 3 consecutive days across weeks.
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium mb-1">Max Hours Per Week</label>
@@ -865,6 +895,21 @@
                                         className={`px-4 py-2 rounded text-white font-medium shadow-sm transition-colors ${confirmDialog.isDestructive ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
                                     >
                                         {confirmDialog.actionText}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Info Modal */}
+                    {infoDialog && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+                            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-300 dark:border-gray-700 max-w-md w-full">
+                                <h3 className="text-xl font-bold mb-3 text-gray-900 dark:text-gray-100">{infoDialog.title}</h3>
+                                <p className="mb-6 text-gray-600 dark:text-gray-300">{infoDialog.message}</p>
+                                <div className="flex justify-end">
+                                    <button onClick={() => setInfoDialog(null)} className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded bg-blue-600 hover:bg-blue-700 text-white transition-colors font-medium shadow-sm">
+                                        OK
                                     </button>
                                 </div>
                             </div>
