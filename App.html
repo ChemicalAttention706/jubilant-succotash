@@ -91,6 +91,7 @@
 
         const App = () => {
             const fileInputRef = useRef(null);
+            const newStudentNameRef = useRef(null);
 
             const [isDarkMode, setIsDarkMode] = useState(() => {
                 try { return JSON.parse(localStorage.getItem('scheduler_dark_mode')) || false; } catch(e) { return false; }
@@ -119,11 +120,25 @@
 
             const [targets, setTargets] = useState(() => {
                 try {
-                    const saved = localStorage.getItem('scheduler_targets_v3');
+                    const saved = localStorage.getItem('scheduler_targets_v4');
                     return saved ? JSON.parse(saved) : {
-                        COORD_A: 1, COORD_B: 1, PREP_A: 5, PREP_B: 5, WC_A: 2, WC_B: 2, WC_C: 2
+                        COORD_A: { weekday: 2, weekend: 1 }, 
+                        COORD_B: { weekday: 2, weekend: 1 }, 
+                        PREP_A: { weekday: 5, weekend: 5 }, 
+                        PREP_B: { weekday: 5, weekend: 5 }, 
+                        WC_A: { weekday: 2, weekend: 2 }, 
+                        WC_B: { weekday: 2, weekend: 2 }, 
+                        WC_C: { weekday: 3, weekend: 3 }
                     };
-                } catch(e) { return { COORD_A: 1, COORD_B: 1, PREP_A: 5, PREP_B: 5, WC_A: 2, WC_B: 2, WC_C: 2 }; }
+                } catch(e) { return { 
+                    COORD_A: { weekday: 2, weekend: 1 }, 
+                    COORD_B: { weekday: 2, weekend: 1 }, 
+                    PREP_A: { weekday: 5, weekend: 5 }, 
+                    PREP_B: { weekday: 5, weekend: 5 }, 
+                    WC_A: { weekday: 2, weekend: 2 }, 
+                    WC_B: { weekday: 2, weekend: 2 }, 
+                    WC_C: { weekday: 3, weekend: 3 } 
+                }; }
             });
 
             const [schedules, setSchedules] = useState(() => {
@@ -149,7 +164,6 @@
             const [activeTab, setActiveTab] = useState('roster'); 
             const [activeGridTab, setActiveGridTab] = useState('COORD');
             
-            const [newStudentName, setNewStudentName] = useState(""); 
             const [newStudentRole, setNewStudentRole] = useState("GENERAL");
             const [editingStudentId, setEditingStudentId] = useState(null); 
             
@@ -162,7 +176,7 @@
             useEffect(() => { safeSetItem('scheduler_dark_mode', JSON.stringify(isDarkMode)); document.documentElement.classList.toggle('dark', isDarkMode); }, [isDarkMode]);
             useEffect(() => { safeSetItem('scheduler_settings_v4', JSON.stringify(settings)); }, [settings]);
             useEffect(() => { safeSetItem('scheduler_students_v3', JSON.stringify(students)); }, [students]);
-            useEffect(() => { safeSetItem('scheduler_targets_v3', JSON.stringify(targets)); }, [targets]);
+            useEffect(() => { safeSetItem('scheduler_targets_v4', JSON.stringify(targets)); }, [targets]);
             useEffect(() => { safeSetItem('scheduler_schedules_v3', JSON.stringify(schedules)); }, [schedules]);
 
             const updateCurrentSchedule = (newScheduleData) => setSchedules(prev => ({ ...prev, [currentWeek]: newScheduleData }));
@@ -212,9 +226,9 @@
                 );
             };
 
-            const studentStats = useMemo(() => {
+            const globalStats = useMemo(() => {
                 const stats = {};
-                students.forEach(s => stats[s.id] = { ...s, currentHours: 0, currentShifts: 0, totalHours: 0, activeWeeks: new Set() });
+                students.forEach(s => stats[s.id] = { ...s, totalHours: 0, activeWeeks: new Set() });
                 
                 Object.entries(schedules).forEach(([weekNum, weekSched]) => {
                     Object.entries(weekSched).forEach(([slotId, assignedIds]) => {
@@ -228,10 +242,6 @@
                             if (stats[id]) {
                                 stats[id].totalHours += shiftHours;
                                 stats[id].activeWeeks.add(weekNum);
-                                if (parseInt(weekNum) === currentWeek) {
-                                    stats[id].currentHours += shiftHours;
-                                    stats[id].currentShifts += 1;
-                                }
                             }
                         });
                     });
@@ -243,7 +253,31 @@
                 });
 
                 return stats;
-            }, [students, schedules, currentWeek]);
+            }, [students, schedules]);
+
+            const studentStats = useMemo(() => {
+                const stats = {};
+                Object.keys(globalStats).forEach(id => {
+                    stats[id] = { ...globalStats[id], currentHours: 0, currentShifts: 0 };
+                });
+
+                Object.entries(schedule).forEach(([slotId, assignedIds]) => {
+                    const parts = slotId.split('::');
+                    if (parts.length < 2) return;
+                    const shiftId = parts[1];
+                    const shiftType = ALL_SHIFTS.find(s => s.id === shiftId);
+                    const shiftHours = shiftType ? shiftType.hours : 0; 
+                    
+                    assignedIds.forEach(id => {
+                        if (stats[id]) {
+                            stats[id].currentHours += shiftHours;
+                            stats[id].currentShifts += 1;
+                        }
+                    });
+                });
+
+                return stats;
+            }, [globalStats, schedule]);
 
             const coordCount = students.filter(s => s.role === 'COORDINATOR').length;
             const generalCount = students.filter(s => s.role === 'GENERAL').length;
@@ -313,6 +347,27 @@
                 return false;
             };
 
+            const getStudentEligibility = (student, day, shift, tempSchedule, allSchedules, weekNum, stats, currentSettings) => {
+                if (shift.track === 'COORDINATOR' && student.role !== 'COORDINATOR') return { isAutoEligible: false, isDisabled: true };
+                if (shift.track !== 'COORDINATOR' && student.role !== 'GENERAL') return { isAutoEligible: false, isDisabled: true };
+
+                const wouldExceed = stats.currentHours + shift.hours > currentSettings.maxHours;
+                const isUnavailable = (student.unavailable || []).includes(`${day}::${shift.id}`);
+                const hardOverlap = isHardOverlap(day, student.id, shift.id, tempSchedule);
+                
+                const prevWeekSchedule = allSchedules[weekNum - 1] || {};
+                const nextWeekSchedule = allSchedules[weekNum + 1] || {};
+                const clopening = isClopening(day, student.id, shift.id, tempSchedule, prevWeekSchedule, nextWeekSchedule);
+                
+                const b2b = isBackToBack(day, student.id, shift.id, tempSchedule);
+                const overDays = isTooManyConsecutiveDays(day, student.id, student.role, tempSchedule, allSchedules, weekNum);
+
+                const isDisabled = wouldExceed || isUnavailable || hardOverlap || clopening || overDays;
+                const isAutoEligible = !isDisabled && !b2b;
+
+                return { wouldExceed, isUnavailable, hardOverlap, clopening, b2b, overDays, isDisabled, isAutoEligible };
+            };
+
             const handleAutoAssign = () => {
                 let newSchedule = { ...schedule };
                 
@@ -321,15 +376,16 @@
                     currentStats[id] = { ...studentStats[id] };
                 });
                 
-                const prevWeekSchedule = schedules[currentWeek - 1] || {};
-                const nextWeekSchedule = schedules[currentWeek + 1] || {};
-                
                 const fillPass = (shiftGroup) => {
                     let slotsToFill = [];
                     DAYS.forEach(day => {
+                        const isWeekend = day === 'Saturday' || day === 'Sunday';
                         shiftGroup.forEach(shift => {
+                            if (shift.track === 'PREP_CREW' && isWeekend) return;
                             const slotId = `${day}::${shift.id}`;
-                            const needed = Math.max(0, (targets[shift.id] || 0) - (newSchedule[slotId] || []).length);
+                            const targetObj = targets[shift.id] || { weekday: 0, weekend: 0 };
+                            const shiftTarget = isWeekend ? targetObj.weekend : targetObj.weekday;
+                            const needed = Math.max(0, shiftTarget - (newSchedule[slotId] || []).length);
                             for (let i = 0; i < needed; i++) slotsToFill.push({ day, shift });
                         });
                     });
@@ -345,16 +401,9 @@
                         let eligible = students.filter(s => {
                             const stats = currentStats[s.id];
                             if (!stats) return false;
-                            if (shift.track === 'COORDINATOR' && s.role !== 'COORDINATOR') return false;
-                            if (shift.track !== 'COORDINATOR' && s.role !== 'GENERAL') return false;
-                            if (stats.currentHours + shift.hours > settings.maxHours) return false;
-                            if ((s.unavailable || []).includes(slotId)) return false;
-                            if (isHardOverlap(day, s.id, shift.id, newSchedule)) return false;
-                            if (isClopening(day, s.id, shift.id, newSchedule, prevWeekSchedule, nextWeekSchedule)) return false; 
-                            if (isBackToBack(day, s.id, shift.id, newSchedule)) return false;
-                            if (isTooManyConsecutiveDays(day, s.id, s.role, newSchedule, schedules, currentWeek)) return false;
-
-                            return true;
+                            
+                            const eligibility = getStudentEligibility(s, day, shift, newSchedule, schedules, currentWeek, stats, settings);
+                            return eligibility.isAutoEligible;
                         });
 
                         if (eligible.length > 0) {
@@ -391,7 +440,7 @@
                 updateCurrentSchedule(newSchedule);
             };
 
-            const exportCSV = (isTemplate = false) => {
+            const exportCSV = (isTemplate = false, allWeeks = false) => {
                 const rows = [];
                 const escapeCSV = (str) => {
                     let safeStr = String(str).replace(/"/g, '""');
@@ -401,29 +450,45 @@
                 
                 if (isTemplate) {
                     const headers = ["Name", "Role (COORDINATOR/GENERAL)"];
-                    DAYS.forEach(d => ALL_SHIFTS.forEach(s => headers.push(`${d.substring(0,3)}::${s.id}`)));
+                    let numSlots = 0;
+                    DAYS.forEach(d => ALL_SHIFTS.forEach(s => {
+                        if (s.track === 'PREP_CREW' && (d === 'Sunday' || d === 'Saturday')) return;
+                        headers.push(`${d.substring(0,3)}::${s.id}`);
+                        numSlots++;
+                    }));
                     rows.push(headers);
-                    rows.push(["Example Coord", "COORDINATOR", ...Array(DAYS.length * ALL_SHIFTS.length).fill("Leave blank for Available, type 'X' for Unavailable")]);
-                    rows.push(["Example Staff", "GENERAL", ...Array(DAYS.length * ALL_SHIFTS.length).fill("")]);
+                    rows.push(["Example Coord", "COORDINATOR", ...Array(numSlots).fill("Leave blank for Available, type 'X' for Unavailable")]);
+                    rows.push(["Example Staff", "GENERAL", ...Array(numSlots).fill("")]);
                 } else {
-                    rows.push([`--- WEEK ${currentWeek} SCHEDULE ---`]);
-                    rows.push(["Day", "Track", "Shift", "Assigned Students"]);
-                    DAYS.forEach(day => {
-                        ALL_SHIFTS.forEach(shift => {
-                            const slotId = `${day}::${shift.id}`;
-                            const assignedIds = schedule[slotId] || [];
-                            const studentNames = assignedIds.map(id => {
-                                const s = students.find(st => st.id === id); return s ? s.name : "";
-                            }).filter(n => n).join(", ");
-                            rows.push([day, shift.track, shift.name, escapeCSV(studentNames)]);
+                    const weeksToExport = allWeeks ? Object.keys(schedules).sort((a,b) => parseInt(a) - parseInt(b)) : [currentWeek];
+                    
+                    weeksToExport.forEach(weekNum => {
+                        const weekSched = schedules[weekNum] || {};
+                        rows.push([`--- WEEK ${weekNum} SCHEDULE ---`]);
+                        rows.push(["Day", "Track", "Shift", "Assigned Students"]);
+                        
+                        DAYS.forEach(day => {
+                            ALL_SHIFTS.forEach(shift => {
+                                if (shift.track === 'PREP_CREW' && (day === 'Sunday' || day === 'Saturday')) return;
+                                const slotId = `${day}::${shift.id}`;
+                                const assignedIds = weekSched[slotId] || [];
+                                const studentNames = assignedIds.map(id => {
+                                    const s = students.find(st => st.id === id); 
+                                    const avg = globalStats[id] ? globalStats[id].rollingAvg : "0.0";
+                                    return s ? `${s.name} (${avg}h)` : "";
+                                }).filter(n => n).join(", ");
+                                rows.push([day, shift.track, shift.name, studentNames]);
+                            });
                         });
+                        
+                        rows.push([]); 
                     });
                 }
 
-                const blob = new Blob([rows.map(r => r.join(",")).join("\n")], { type: 'text/csv;charset=utf-8;' });
+                const blob = new Blob([rows.map(r => r.map(escapeCSV).join(",")).join("\n")], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement("a");
                 link.href = URL.createObjectURL(blob);
-                link.download = isTemplate ? `import_template.csv` : `schedule_week_${currentWeek}.csv`;
+                link.download = isTemplate ? `import_template.csv` : (allWeeks ? `schedule_all_weeks.csv` : `schedule_week_${currentWeek}.csv`);
                 link.click();
             };
 
@@ -453,7 +518,7 @@
                                     }
                                 }
                             }
-                            return { id: Date.now() + index, name: cols[0], role, unavailable };
+                            return { id: crypto.randomUUID(), name: cols[0], role, unavailable };
                         }).filter(s => s.name && !s.name.includes("Example")); 
 
                         if (newStudents.length > 0) {
@@ -494,22 +559,31 @@
             };
 
             const renderShiftRow = (shift) => {
-                const prevWeekSchedule = schedules[currentWeek - 1] || {};
-                const nextWeekSchedule = schedules[currentWeek + 1] || {};
-
+                const targetObj = targets[shift.id] || { weekday: 0, weekend: 0 };
+                
                 return (
                     <tr key={shift.id}>
                         <td className="sticky left-0 z-10 p-3 border-b border-r border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] dark:shadow-[2px_0_5px_-2px_rgba(0,0,0,0.5)]">
                             <div className="font-semibold text-gray-800 dark:text-gray-200">{shift.name}</div>
                             <div className="text-xs text-gray-500 mt-1 flex justify-between">
                                 <span>{shift.hours}h</span>
-                                <span>Target: {targets[shift.id]}</span>
+                                <span className="text-right">Target: {targetObj.weekday} (Wkdy) / {targetObj.weekend} (Wknd)</span>
                             </div>
                         </td>
                         {DAYS.map(day => {
+                            const isWeekend = day === 'Saturday' || day === 'Sunday';
                             const slotId = `${day}::${shift.id}`;
+                            
+                            if (shift.track === 'PREP_CREW' && isWeekend) {
+                                return (
+                                    <td key={slotId} className="p-2 border-b border-l border-gray-300 dark:border-gray-700 min-w-[170px] align-middle bg-gray-100 dark:bg-gray-800/50">
+                                        <div className="text-center text-gray-400 dark:text-gray-500 text-xs font-medium italic">No Shift</div>
+                                    </td>
+                                );
+                            }
+
                             const assigned = schedule[slotId] || [];
-                            const target = targets[shift.id] || 0;
+                            const target = isWeekend ? targetObj.weekend : targetObj.weekday;
                             const isMet = assigned.length >= target;
                             const isCoord = shift.track === 'COORDINATOR';
                             
@@ -567,12 +641,8 @@
                                                             <div className="p-2 text-xs text-gray-500 italic text-center">No available staff</div>
                                                         ) : eligibleStudents.map(s => {
                                                             const stats = studentStats[s.id];
-                                                            const wouldExceed = stats.currentHours + shift.hours > settings.maxHours;
-                                                            const isUnavailable = (s.unavailable || []).includes(slotId);
-                                                            const hardOverlap = isHardOverlap(day, s.id, shift.id, schedule);
-                                                            const clopening = isClopening(day, s.id, shift.id, schedule, prevWeekSchedule, nextWeekSchedule);
-                                                            const b2b = isBackToBack(day, s.id, shift.id, schedule);
-                                                            const overDays = isTooManyConsecutiveDays(day, s.id, s.role, schedule, schedules, currentWeek);
+                                                            
+                                                            const { wouldExceed, isUnavailable, hardOverlap, clopening, b2b, overDays, isDisabled } = getStudentEligibility(s, day, shift, schedule, schedules, currentWeek, stats, settings);
                                                             
                                                             let flag = "";
                                                             if(wouldExceed) flag = " (Max Hrs)";
@@ -580,16 +650,14 @@
                                                             if(hardOverlap) flag = " (Overlap)";
                                                             if(clopening) flag = " (Clopen)";
                                                             if(overDays) flag = " (>3 Days)";
-                                                            if(b2b && !wouldExceed && !isUnavailable && !hardOverlap && !clopening && !overDays) flag = " ⚠️ (B2B)";
-
-                                                            const isDisabled = wouldExceed || isUnavailable || hardOverlap || clopening || overDays;
+                                                            if(b2b && !isDisabled) flag = " ⚠️ (B2B)";
 
                                                             return (
                                                                 <button 
                                                                     key={s.id} 
                                                                     disabled={isDisabled}
                                                                     onClick={() => {
-                                                                        updateCurrentSchedule({...schedule, [slotId]: [...assigned, s.id]});
+                                                                        updateCurrentSchedule({...schedule, [slotId]: Array.from(new Set([...assigned, s.id]))});
                                                                         setOpenDropdown(null);
                                                                     }}
                                                                     className={`w-full text-left p-2 text-xs border-b last:border-b-0 border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${isDisabled ? 'opacity-50 cursor-not-allowed bg-gray-50 dark:bg-gray-900/50 text-gray-500' : (b2b ? 'text-red-600 dark:text-red-400 font-bold' : 'text-gray-800 dark:text-gray-200')}`}
@@ -637,6 +705,7 @@
                             <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1 hidden sm:block"></div>
                             
                             <button onClick={() => exportCSV(false)} className="px-3 py-2 border border-green-400 rounded text-green-700 bg-green-50 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400 text-sm font-medium">📤 Export Week</button>
+                            <button onClick={() => exportCSV(false, true)} className="px-3 py-2 border border-green-400 rounded text-green-700 bg-green-50 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400 text-sm font-medium">📤 Export All</button>
                             <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1 hidden sm:block"></div>
                             
                             <button onClick={() => { 
@@ -655,7 +724,7 @@
                         <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-300 dark:border-gray-700 h-[calc(100vh-160px)] flex flex-col overflow-hidden">
                             <div className="flex border-b border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-900/50 flex-shrink-0">
                                 <button onClick={() => setActiveGridTab('COORD')} className={`px-6 py-3 text-sm font-bold transition-colors ${activeGridTab === 'COORD' ? 'border-b-2 border-amber-600 text-amber-700 dark:text-amber-400 bg-white dark:bg-gray-800' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800/50'}`}>Coordinators</button>
-                                <button onClick={() => setActiveGridTab('PREP')} className={`px-6 py-3 text-sm font-bold transition-colors ${activeGridTab === 'PREP' ? 'border-b-2 border-teal-600 text-teal-700 dark:text-teal-400 bg-white dark:bg-gray-800' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800/50'}`}>Prep Crew</button>
+                                <button onClick={() => setActiveGridTab('PREP')} className={`px-6 py-3 text-sm font-bold transition-colors ${activeGridTab === 'PREP' ? 'border-b-2 border-teal-600 text-teal-700 dark:text-blue-400 bg-white dark:bg-gray-800' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800/50'}`}>Prep Crew</button>
                                 <button onClick={() => setActiveGridTab('WC')} className={`px-6 py-3 text-sm font-bold transition-colors ${activeGridTab === 'WC' ? 'border-b-2 border-blue-600 text-blue-700 dark:text-blue-400 bg-white dark:bg-gray-800' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800/50'}`}>Welcome Center</button>
                             </div>
                             
@@ -695,7 +764,7 @@
 
                                         <form onSubmit={(e) => { 
                                             e.preventDefault(); 
-                                            const trimmedName = newStudentName.trim();
+                                            const trimmedName = (newStudentNameRef.current?.value || "").trim();
                                             if (!trimmedName) {
                                                 promptInfo("Invalid Input", "Please enter a valid student name.");
                                                 return;
@@ -704,10 +773,10 @@
                                                 promptInfo("Duplicate Name", "A student with this name already exists.");
                                                 return;
                                             }
-                                            setStudents([...students, { id: Date.now(), name: trimmedName, role: newStudentRole, unavailable: [] }]); 
-                                            setNewStudentName(''); 
+                                            setStudents([...students, { id: crypto.randomUUID(), name: trimmedName, role: newStudentRole, unavailable: [] }]); 
+                                            if (newStudentNameRef.current) newStudentNameRef.current.value = ''; 
                                         }} className="flex flex-col gap-2 bg-gray-100 dark:bg-gray-700/30 p-3 rounded border border-gray-300 dark:border-gray-700">
-                                            <input type="text" value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)} placeholder="Student Name" className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-1.5 rounded text-sm w-full outline-none" />
+                                            <input type="text" ref={newStudentNameRef} placeholder="Student Name" className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-1.5 rounded text-sm w-full outline-none" />
                                             <div className="flex gap-2">
                                                 <select value={newStudentRole} onChange={(e) => setNewStudentRole(e.target.value)} className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-1.5 rounded text-sm flex-1 outline-none">
                                                     <option value="GENERAL">General Staff</option>
@@ -784,11 +853,24 @@
                                                 {group.shifts.map(shift => (
                                                     <div key={shift.id} className="flex justify-between items-center mb-2">
                                                         <label className="text-sm dark:text-gray-400">{shift.name}</label>
-                                                        <input 
-                                                            type="number" min="0" value={targets[shift.id]}
-                                                            onChange={(e) => setTargets({...targets, [shift.id]: parseInt(e.target.value, 10) || 0})}
-                                                            className="w-16 border border-gray-300 dark:border-gray-600 rounded p-1 text-center bg-white dark:bg-gray-700 outline-none"
-                                                        />
+                                                        <div className="flex gap-2">
+                                                            <div className="flex items-center gap-1">
+                                                                <span className="text-xs text-gray-500">Wkdy:</span>
+                                                                <input 
+                                                                    type="number" min="0" value={targets[shift.id]?.weekday || 0}
+                                                                    onChange={(e) => setTargets({...targets, [shift.id]: {...targets[shift.id], weekday: parseInt(e.target.value, 10) || 0}})}
+                                                                    className="w-12 border border-gray-300 dark:border-gray-600 rounded p-1 text-center bg-white dark:bg-gray-700 outline-none"
+                                                                />
+                                                            </div>
+                                                            <div className="flex items-center gap-1">
+                                                                <span className="text-xs text-gray-500">Wknd:</span>
+                                                                <input 
+                                                                    type="number" min="0" value={targets[shift.id]?.weekend || 0}
+                                                                    onChange={(e) => setTargets({...targets, [shift.id]: {...targets[shift.id], weekend: parseInt(e.target.value, 10) || 0}})}
+                                                                    className="w-12 border border-gray-300 dark:border-gray-600 rounded p-1 text-center bg-white dark:bg-gray-700 outline-none"
+                                                                />
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>
@@ -806,15 +888,15 @@
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium mb-1">Max Hours Per Week</label>
-                                            <input type="number" value={settings.maxHours} onChange={(e) => setSettings({...settings, maxHours: parseInt(e.target.value)})} className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 bg-white dark:bg-gray-700 outline-none" />
+                                            <input type="number" min="0" value={settings.maxHours} onChange={(e) => setSettings({...settings, maxHours: parseInt(e.target.value, 10) || 0})} className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 bg-white dark:bg-gray-700 outline-none" />
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium mb-1">Target Coordinator Pool Size</label>
-                                            <input type="number" value={settings.poolCoord} onChange={(e) => setSettings({...settings, poolCoord: parseInt(e.target.value)})} className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 bg-white dark:bg-gray-700 outline-none" />
+                                            <input type="number" min="0" value={settings.poolCoord} onChange={(e) => setSettings({...settings, poolCoord: parseInt(e.target.value, 10) || 0})} className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 bg-white dark:bg-gray-700 outline-none" />
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium mb-1">Target General Staff Pool Size</label>
-                                            <input type="number" value={settings.poolGeneral} onChange={(e) => setSettings({...settings, poolGeneral: parseInt(e.target.value)})} className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 bg-white dark:bg-gray-700 outline-none" />
+                                            <input type="number" min="0" value={settings.poolGeneral} onChange={(e) => setSettings({...settings, poolGeneral: parseInt(e.target.value, 10) || 0})} className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 bg-white dark:bg-gray-700 outline-none" />
                                         </div>
                                     </div>
                                 )}
@@ -858,7 +940,12 @@
                                             {DAYS.map(day => (
                                                 <div key={day} className="space-y-1">
                                                     <div className="text-center text-sm font-bold bg-gray-100 dark:bg-gray-700 py-1 rounded border border-gray-200 dark:border-gray-600">{day.substring(0,3)}</div>
-                                                    {ALL_SHIFTS.filter(shift => editingStudent.role === 'COORDINATOR' ? shift.track === 'COORDINATOR' : shift.track !== 'COORDINATOR').map(shift => {
+                                                    {ALL_SHIFTS.filter(shift => {
+                                                        if (editingStudent.role === 'COORDINATOR' && shift.track !== 'COORDINATOR') return false;
+                                                        if (editingStudent.role !== 'COORDINATOR' && shift.track === 'COORDINATOR') return false;
+                                                        if (shift.track === 'PREP_CREW' && (day === 'Sunday' || day === 'Saturday')) return false;
+                                                        return true;
+                                                    }).map(shift => {
                                                         const slotId = `${day}::${shift.id}`;
                                                         const isOff = (editingStudent.unavailable || []).includes(slotId);
                                                         return (
