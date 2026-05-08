@@ -603,9 +603,10 @@
 
                         const dayCols = [];
                         headers.forEach((h, idx) => {
-                            const match = h.match(/Which hours are you not available\? \[([^\]]+)\]/i);
-                            if (match) {
-                                dayCols.push({ index: idx, day: match[1].trim() });
+                            const match = h.match(/\[(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\]/i);
+                            if (match && h.toLowerCase().includes('not available')) {
+                                const normalizedDay = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+                                dayCols.push({ index: idx, day: normalizedDay });
                             }
                         });
 
