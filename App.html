@@ -132,8 +132,8 @@
                     COORD_WC_B: { weekday: 1, weekend: 1 }, 
                     COORD_PC_A: { weekday: 1, weekend: 0 }, 
                     COORD_PC_B: { weekday: 1, weekend: 0 }, 
-                    PREP_A: { weekday: 5, weekend: 5 }, 
-                    PREP_B: { weekday: 5, weekend: 5 }, 
+                    PREP_A: { weekday: 5, weekend: 0 }, 
+                    PREP_B: { weekday: 5, weekend: 0 }, 
                     WC_A: { weekday: 2, weekend: 2 }, 
                     WC_B: { weekday: 2, weekend: 2 }, 
                     WC_C: { weekday: 3, weekend: 3 }
@@ -281,8 +281,30 @@
             const coordCount = students.filter(s => s.role === 'COORDINATOR').length;
             const generalCount = students.filter(s => s.role === 'GENERAL').length;
 
+            // DYNAMIC SHIFT CHECKER
+            const checkShiftRelationship = (day, studentId, targetShift, tempSchedule) => {
+                const studentShifts = ALL_SHIFTS.filter(s => 
+                    s.id !== targetShift.id && (tempSchedule[`${day}::${s.id}`] || []).includes(studentId)
+                );
+                
+                let hardOverlap = false;
+                let b2b = false;
+
+                for (const s of studentShifts) {
+                    // Overlap: Starts before target ends AND ends after target starts
+                    if (s.startHour < targetShift.endHour && s.endHour > targetShift.startHour) {
+                        hardOverlap = true;
+                    } 
+                    // Back to Back: Ends exactly when target starts OR starts exactly when target ends
+                    else if (s.endHour === targetShift.startHour || s.startHour === targetShift.endHour) {
+                        b2b = true;
+                    }
+                }
+                
+                return { hardOverlap, b2b };
+            };
+
             const isHardOverlap = (day, studentId, targetShiftId, tempSchedule) => {
-                if ((tempSchedule[`${day}::${targetShiftId}`] || []).includes(studentId)) return true;
                 const blockedBy = OVERLAPS[targetShiftId] || [];
                 for (const oId of blockedBy) {
                     if ((tempSchedule[`${day}::${oId}`] || []).includes(studentId)) return true;
@@ -350,6 +372,7 @@
                 if (shift.track === 'COORDINATOR' && student.role !== 'COORDINATOR') return { isAutoEligible: false, isDisabled: true };
                 if (shift.track !== 'COORDINATOR' && student.role !== 'GENERAL') return { isAutoEligible: false, isDisabled: true };
 
+                const isAlreadyAssigned = (tempSchedule[`${day}::${shift.id}`] || []).includes(student.id);
                 const wouldExceed = stats.currentHours + shift.hours > currentSettings.maxHours;
                 
                 const unavailable = student.unavailable || [];
@@ -358,31 +381,27 @@
                     (_, i) => shift.startHour + i
                 ).some(h => unavailable.includes(`${day}::${h}`));
 
-                const hardOverlap = isHardOverlap(day, student.id, shift.id, tempSchedule);
+                const { hardOverlap, b2b } = checkShiftRelationship(day, student.id, shift, tempSchedule);
                 
                 const prevWeekSchedule = allSchedules[weekNum - 1] || {};
                 const nextWeekSchedule = allSchedules[weekNum + 1] || {};
                 const clopening = isClopening(day, student.id, shift.id, tempSchedule, prevWeekSchedule, nextWeekSchedule);
                 
-                const b2b = isBackToBack(day, student.id, shift.id, tempSchedule);
                 const overDays = isTooManyConsecutiveDays(day, student.id, student.role, tempSchedule, allSchedules, weekNum);
 
                 // Coordinator specific rules
                 let isDailyCoordLimitReached = false;
                 if (student.role === 'COORDINATOR') {
                     const dailyCoordCount = SHIFTS.COORD.filter(cShift => (tempSchedule[`${day}::${cShift.id}`] || []).includes(student.id)).length;
-                    if (dailyCoordCount >= 1 && !((tempSchedule[`${day}::${shift.id}`] || []).includes(student.id))) {
+                    if (dailyCoordCount >= 1 && !isAlreadyAssigned) {
                         isDailyCoordLimitReached = true;
                     }
                 }
 
-                const isWeekend = day === 'Saturday' || day === 'Sunday';
-                const isPrepCoordOnWeekend = shift.subTrack === 'PREP' && isWeekend;
-
-                const isDisabled = wouldExceed || isUnavailable || hardOverlap || clopening || overDays || isDailyCoordLimitReached || isPrepCoordOnWeekend;
+                const isDisabled = isAlreadyAssigned || wouldExceed || isUnavailable || hardOverlap || clopening || overDays || isDailyCoordLimitReached;
                 const isAutoEligible = !isDisabled && !b2b;
 
-                return { wouldExceed, isUnavailable, hardOverlap, clopening, b2b, overDays, isDailyCoordLimitReached, isPrepCoordOnWeekend, isDisabled, isAutoEligible };
+                return { wouldExceed, isUnavailable, hardOverlap, clopening, b2b, overDays, isDailyCoordLimitReached, isDisabled, isAutoEligible };
             };
 
             const slotEligibility = useMemo(() => {
@@ -422,6 +441,7 @@
                     DAYS.forEach(day => {
                         const isWeekend = day === 'Saturday' || day === 'Sunday';
                         shiftGroup.forEach(shift => {
+                            // Strictly prevent auto-assignment rules for weekend prep shifts
                             if ((shift.track === 'PREP_CREW' || shift.subTrack === 'PREP') && isWeekend) return;
                             const slotId = `${day}::${shift.id}`;
                             const targetObj = targets[shift.id] || { weekday: 0, weekend: 0 };
@@ -520,7 +540,6 @@
                     
                     DAYS.forEach(day => {
                         ALL_SHIFTS.forEach(shift => {
-                            if ((shift.track === 'PREP_CREW' || shift.subTrack === 'PREP') && (day === 'Sunday' || day === 'Saturday')) return;
                             const slotId = `${day}::${shift.id}`;
                             const assignedIds = weekSched[slotId] || [];
                             const studentNames = assignedIds.map(id => {
@@ -550,7 +569,6 @@
                     try {
                         const text = event.target.result;
                         
-                        // Robust CSV Parser to handle newlines inside quotes
                         const parseCSV = (str) => {
                             const result = [];
                             let row = [];
@@ -612,7 +630,7 @@
 
                         const newStudents = rows.slice(1).map((cols) => {
                             const name = cols[nameIdx];
-                            if (!name) return null; // Skip empty rows
+                            if (!name) return null; 
                             
                             const roleStr = cols[roleIdx]?.toUpperCase() || "";
                             const role = roleStr.includes('COORDINATOR') ? 'COORDINATOR' : 'GENERAL';
@@ -644,7 +662,6 @@
                             return { id: generateId(), name, role, unavailable };
                         }).filter(Boolean).filter(s => !s.name.includes("Example")); 
 
-                        // Deduplicate by name, keeping the last submission (latest timestamp wins)
                         const seen = new Map();
                         newStudents.forEach(s => seen.set(s.name.toLowerCase().trim(), s));
                         const dedupedStudents = Array.from(seen.values());
@@ -706,14 +723,6 @@
                         {DAYS.map(day => {
                             const isWeekend = day === 'Saturday' || day === 'Sunday';
                             const slotId = `${day}::${shift.id}`;
-                            
-                            if ((shift.track === 'PREP_CREW' || shift.subTrack === 'PREP') && isWeekend) {
-                                return (
-                                    <td key={slotId} className="p-2 border-b border-l border-gray-300 dark:border-gray-700 min-w-[170px] align-middle bg-gray-100 dark:bg-gray-800/50">
-                                        <div className="text-center text-gray-400 dark:text-gray-500 text-xs font-medium italic">No Shift</div>
-                                    </td>
-                                        );
-                            }
 
                             const assigned = schedule[slotId] || [];
                             const target = isWeekend ? targetObj.weekend : targetObj.weekday;
@@ -741,13 +750,38 @@
                                             const student = students.find(s => s.id === studentId);
                                             if(!student) return null;
                                             
-                                            const hasB2B = isBackToBack(day, studentId, shift.id, schedule);
+                                            // Dynamic Overlap/B2B Evaluation
+                                            const { hardOverlap, b2b } = checkShiftRelationship(day, studentId, shift, schedule);
+                                            const isUnavailable = Array.from(
+                                                { length: shift.endHour - shift.startHour },
+                                                (_, i) => shift.startHour + i
+                                            ).some(h => (student.unavailable || []).includes(`${day}::${h}`));
+                                            
+                                            const hasConflict = hardOverlap;
+                                            const hasTimeOff = isUnavailable;
+                                            const hasB2B = b2b;
+
+                                            let borderClass = 'border-gray-300 dark:border-gray-600';
+                                            let bgClass = isCoord ? 'bg-amber-50 dark:bg-amber-900/30' : 'bg-white dark:bg-gray-700';
+                                            
+                                            if (hasConflict) {
+                                                borderClass = 'border-red-500 shadow-[0_0_0_1px_#ef4444] dark:border-red-500';
+                                                bgClass = 'bg-red-50 dark:bg-red-900/40';
+                                            } else if (hasTimeOff) {
+                                                borderClass = 'border-purple-500 shadow-[0_0_0_1px_#a855f7] dark:border-purple-500';
+                                                bgClass = 'bg-purple-50 dark:bg-purple-900/40';
+                                            } else if (hasB2B) {
+                                                borderClass = 'border-amber-400 shadow-[0_0_0_1px_#fbbf24] dark:border-amber-500';
+                                                bgClass = 'bg-amber-50 dark:bg-amber-900/40';
+                                            }
                                             
                                             return (
-                                                <div key={studentId} className={`border rounded px-2 py-1.5 text-sm shadow-sm flex justify-between items-center group ${isCoord ? 'bg-amber-50 border-amber-200 dark:bg-amber-900/30 dark:border-amber-700' : 'bg-white border-gray-300 dark:bg-gray-700 dark:border-gray-600'} ${hasB2B ? 'border-red-500 shadow-[0_0_0_1px_#ef4444] dark:border-red-500 dark:shadow-[0_0_0_1px_#ef4444]' : ''}`}>
+                                                <div key={studentId} className={`border rounded px-2 py-1.5 text-sm shadow-sm flex justify-between items-center group transition-colors ${bgClass} ${borderClass}`}>
                                                     <span className="truncate pr-2 dark:text-gray-200 flex items-center gap-1">
                                                         {student.name}
-                                                        {hasB2B && <span title="Manual Override: Back-to-Back Shift" className="text-red-500 text-[10px]">⚠️</span>}
+                                                        {hasConflict && <span title="Conflict: Double-booked hours" className="text-red-500 text-[10px]">🚨</span>}
+                                                        {!hasConflict && hasTimeOff && <span title="Unavailable: Time-off requested" className="text-purple-500 text-[10px]">🛑</span>}
+                                                        {!hasConflict && !hasTimeOff && hasB2B && <span title="Double Shift (Back-to-Back)" className="text-amber-500 text-[10px]">⚠️</span>}
                                                     </span>
                                                     <button onClick={() => updateCurrentSchedule({...schedule, [slotId]: assigned.filter(id => id !== studentId)})} className="text-gray-400 hover:text-red-500">✕</button>
                                                 </div>
@@ -769,26 +803,24 @@
                                                     <div className="absolute top-full left-0 mt-1 min-w-[200px] w-full max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-xl z-40">
                                                         {slotEntries.length === 0 ? (
                                                             <div className="p-2 text-xs text-gray-500 italic text-center">No available staff</div>
-                                                        ) : slotEntries.map(({ student: s, stats, wouldExceed, isUnavailable, hardOverlap, clopening, b2b, overDays, isDailyCoordLimitReached, isPrepCoordOnWeekend, isDisabled }) => {
+                                                        ) : slotEntries.map(({ student: s, stats, wouldExceed, isUnavailable, hardOverlap, clopening, b2b, overDays, isDailyCoordLimitReached, isDisabled }) => {
                                                             let flag = "";
-                                                            if(wouldExceed) flag = " (Max Hrs)";
-                                                            else if(isUnavailable) flag = " (Off)";
-                                                            else if(isPrepCoordOnWeekend) flag = " (No Wknd)";
-                                                            else if(isDailyCoordLimitReached) flag = " (1/day Max)";
-                                                            else if(hardOverlap) flag = " (Overlap)";
-                                                            else if(clopening) flag = " (Clopen)";
-                                                            else if(overDays) flag = " (>3 Days)";
-                                                            else if(b2b && !isDisabled) flag = " ⚠️ (B2B)";
+                                                            if(wouldExceed) flag = " ⚠️ (Max Hrs)";
+                                                            else if(isUnavailable) flag = " 🛑 (Off)";
+                                                            else if(isDailyCoordLimitReached) flag = " ⚠️ (1/day Max)";
+                                                            else if(hardOverlap) flag = " 🚨 (Overlap)";
+                                                            else if(clopening) flag = " ⚠️ (Clopen)";
+                                                            else if(overDays) flag = " ⚠️ (>3 Days)";
+                                                            else if(b2b) flag = " ⚠️ (Double Shift)";
 
                                                             return (
                                                                 <button 
                                                                     key={s.id} 
-                                                                    disabled={isDisabled}
                                                                     onClick={() => {
                                                                         updateCurrentSchedule({...schedule, [slotId]: Array.from(new Set([...assigned, s.id]))});
                                                                         setOpenDropdown(null);
                                                                     }}
-                                                                    className={`w-full text-left p-2 text-xs border-b last:border-b-0 border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors ${isDisabled ? 'opacity-50 cursor-not-allowed bg-gray-50 dark:bg-gray-900/50 text-gray-500' : (b2b ? 'text-red-600 dark:text-red-400 font-bold' : 'text-gray-800 dark:text-gray-200')}`}
+                                                                    className={`w-full text-left p-2 text-xs border-b last:border-b-0 border-gray-100 dark:border-gray-700 transition-colors ${(isDisabled || b2b) ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20' : 'text-gray-800 dark:text-gray-200 hover:bg-blue-50 dark:hover:bg-gray-700'}`}
                                                                 >
                                                                     {s.name} ({stats.currentHours}h){flag}
                                                                 </button>
@@ -1011,8 +1043,8 @@
                                     <div className="space-y-4">
                                         <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 p-3 rounded text-sm text-yellow-800 dark:text-yellow-300 mb-4">
                                             Adjust these variables to modify the Auto-Assigner's logic constraints.<br/><br/>
-                                            <strong>New Rules Added:</strong><br/>
-                                            • The Auto-Assigner blocks Back-to-Back (B2B) shifts, but they can be manually added via dropdown override (marked with a ⚠️).<br/>
+                                            <strong>Scheduling Protocols:</strong><br/>
+                                            • The Auto-Assigner will strictly skip weekend prep shifts, letting you assign them manually via the dashboard dropdown only.<br/>
                                             • General Staff are strictly blocked from working > 3 consecutive days across weeks.<br/>
                                             • Coordinators are strictly limited to one shift per day and balanced between WC and Prep roles.
                                         </div>
