@@ -641,14 +641,36 @@
                         if (dedupedStudents.length > 0) {
                             const dupCount = newStudents.length - dedupedStudents.length;
                             const dupNote = dupCount > 0 ? ` (${dupCount} duplicate submission${dupCount > 1 ? 's' : ''} removed)` : '';
+                            
+                            const existingByName = new Map(students.map(s => [s.name.toLowerCase().trim(), s]));
+
+                            let updated = 0, added = 0;
+                            dedupedStudents.forEach(s => {
+                                if (existingByName.has(s.name.toLowerCase().trim())) updated++;
+                                else added++;
+                            });
+
+                            // This is the updated message that perfectly describes the new non-destructive import!
                             promptConfirm(
                                 "Import Students",
-                                `Successfully parsed ${dedupedStudents.length} students${dupNote} from the Google Form. Importing this will clear ALL existing schedules. Proceed?`,
+                                `Parsed ${dedupedStudents.length} students${dupNote}. ${updated} existing student${updated !== 1 ? 's' : ''} will have their availability updated. ${added} new student${added !== 1 ? 's' : ''} will be added. No schedules will be cleared. Proceed?`,
                                 "Import Data",
                                 () => {
-                                    setStudents(dedupedStudents);
-                                    setSchedules({ 1: {} });
-                                    setCurrentWeek(1);
+                                    setStudents(prev => {
+                                        const byName = new Map(prev.map(s => [s.name.toLowerCase().trim(), s]));
+                                        const incoming = new Map(dedupedStudents.map(s => [s.name.toLowerCase().trim(), s]));
+
+                                        // Update existing students' availability
+                                        const updatedList = prev.map(s => {
+                                            const match = incoming.get(s.name.toLowerCase().trim());
+                                            if (match) return { ...s, unavailable: match.unavailable };
+                                            return s;
+                                        });
+
+                                        // Add brand new students
+                                        const newStudentsList = dedupedStudents.filter(s => !byName.has(s.name.toLowerCase().trim()));
+                                        return [...updatedList, ...newStudentsList];
+                                    });
                                 },
                                 false
                             );
@@ -707,7 +729,6 @@
                             const isWeekend = day === 'Saturday' || day === 'Sunday';
                             const slotId = `${day}::${shift.id}`;
 
-                            // For custom shifts, grey out days not in the shift's active days list
                             if (shift.track === 'CUSTOM' && shift.days && !shift.days.includes(day)) {
                                 return (
                                     <td key={slotId} className="p-2 border-b border-l border-gray-300 dark:border-gray-700 min-w-[170px] align-middle bg-gray-100 dark:bg-gray-800/50">
@@ -1064,7 +1085,6 @@
                                         <div className="border-t border-gray-300 dark:border-gray-700 pt-4 mt-4">
                                             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Custom Shifts</div>
 
-                                            {/* Existing custom shifts list */}
                                             {customShifts.length > 0 && (
                                                 <div className="space-y-2 mb-4">
                                                     {customShifts.map(shift => {
@@ -1106,7 +1126,6 @@
                                                 </div>
                                             )}
 
-                                            {/* New custom shift form */}
                                             <div className="bg-gray-100 dark:bg-gray-700/30 p-3 rounded border border-gray-300 dark:border-gray-700 space-y-2">
                                                 <input
                                                     type="text"
