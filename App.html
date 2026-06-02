@@ -133,6 +133,13 @@
                 } catch(e) { return []; }
             });
 
+            const [weekDates, setWeekDates] = useState(() => {
+                try {
+                    const saved = localStorage.getItem('scheduler_week_dates_v1');
+                    return saved ? JSON.parse(saved) : {};
+                } catch(e) { return {}; }
+            });
+
             const [currentWeek, setCurrentWeek] = useState(1);
             const [activeTab, setActiveTab] = useState('roster'); 
             const [activeGridTab, setActiveGridTab] = useState('COORD');
@@ -159,8 +166,17 @@
             useEffect(() => { safeSetItem('scheduler_targets_v4', JSON.stringify(targets)); }, [targets]);
             useEffect(() => { safeSetItem('scheduler_schedules_v4', JSON.stringify(schedules)); }, [schedules]);
             useEffect(() => { safeSetItem('scheduler_custom_shifts_v1', JSON.stringify(customShifts)); }, [customShifts]);
+            useEffect(() => { safeSetItem('scheduler_week_dates_v1', JSON.stringify(weekDates)); }, [weekDates]);
 
             const updateCurrentSchedule = (newScheduleData) => setSchedules(prev => ({ ...prev, [currentWeek]: newScheduleData }));
+
+            const formatDateRange = (startDateStr) => {
+                const start = new Date(startDateStr + 'T00:00:00');
+                const end = new Date(start);
+                end.setDate(end.getDate() + 6);
+                const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                return `${fmt(start)} – ${fmt(end)}`;
+            };
 
             const promptConfirm = (title, message, actionText, actionFn, isDestructive = true) => {
                 setConfirmDialog({ title, message, actionText, actionFn, isDestructive });
@@ -504,7 +520,8 @@
                 
                 weeksToExport.forEach(weekNum => {
                     const weekSched = schedules[weekNum] || {};
-                    rows.push([`--- WEEK ${weekNum} SCHEDULE ---`]);
+                    const weekLabel = weekDates[weekNum] ? ` (${formatDateRange(weekDates[weekNum])})` : '';
+                    rows.push([`--- WEEK ${weekNum}${weekLabel} SCHEDULE ---`]);
                     rows.push(["Day", "Track", "Shift", "Assigned Students"]);
                     
                     DAYS.forEach(day => {
@@ -650,7 +667,6 @@
                                 else added++;
                             });
 
-                            // This is the updated message that perfectly describes the new non-destructive import!
                             promptConfirm(
                                 "Import Students",
                                 `Parsed ${dedupedStudents.length} students${dupNote}. ${updated} existing student${updated !== 1 ? 's' : ''} will have their availability updated. ${added} new student${added !== 1 ? 's' : ''} will be added. No schedules will be cleared. Proceed?`,
@@ -860,10 +876,38 @@
                         <div>
                             <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Summer Staff Scheduler</h1>
                             <div className="flex items-center gap-4 mt-2">
-                                <div className="flex items-center bg-gray-100 dark:bg-gray-900 rounded-lg p-1 border border-gray-300 dark:border-gray-700 shadow-inner">
-                                    <button onClick={() => setCurrentWeek(Math.max(1, currentWeek - 1))} disabled={currentWeek === 1} className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm disabled:opacity-50">←</button>
-                                    <span className="px-4 font-bold text-blue-600 dark:text-blue-400">Week {currentWeek}</span>
-                                    <button onClick={() => { if (!schedules[currentWeek + 1]) setSchedules({...schedules, [currentWeek + 1]: {}}); setCurrentWeek(currentWeek + 1); }} className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm">→</button>
+                                <div className="flex flex-col gap-1">
+                                    <div className="flex items-center bg-gray-100 dark:bg-gray-900 rounded-lg p-1 border border-gray-300 dark:border-gray-700 shadow-inner">
+                                        <button onClick={() => setCurrentWeek(Math.max(1, currentWeek - 1))} disabled={currentWeek === 1} className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm disabled:opacity-50">←</button>
+                                        <span className="px-4 font-bold text-blue-600 dark:text-blue-400">Week {currentWeek}</span>
+                                        <button onClick={() => {
+                                            if (!schedules[currentWeek + 1]) setSchedules({...schedules, [currentWeek + 1]: {}});
+                                            if (!weekDates[currentWeek + 1] && weekDates[currentWeek]) {
+                                                const next = new Date(weekDates[currentWeek] + 'T00:00:00');
+                                                next.setDate(next.getDate() + 7);
+                                                const yyyy = next.getFullYear();
+                                                const mm = String(next.getMonth() + 1).padStart(2, '0');
+                                                const dd = String(next.getDate()).padStart(2, '0');
+                                                setWeekDates(prev => ({...prev, [currentWeek + 1]: `${yyyy}-${mm}-${dd}`}));
+                                            }
+                                            setCurrentWeek(currentWeek + 1);
+                                        }} className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm">→</button>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {weekDates[currentWeek] ? (
+                                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                                                📅 {formatDateRange(weekDates[currentWeek])}
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs text-gray-400 dark:text-gray-500 italic">No date set</span>
+                                        )}
+                                        <input
+                                            type="date"
+                                            value={weekDates[currentWeek] || ''}
+                                            onChange={(e) => setWeekDates(prev => ({...prev, [currentWeek]: e.target.value}))}
+                                            className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 outline-none"
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1085,6 +1129,7 @@
                                         <div className="border-t border-gray-300 dark:border-gray-700 pt-4 mt-4">
                                             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Custom Shifts</div>
 
+                                            {/* Existing custom shifts list */}
                                             {customShifts.length > 0 && (
                                                 <div className="space-y-2 mb-4">
                                                     {customShifts.map(shift => {
@@ -1126,6 +1171,7 @@
                                                 </div>
                                             )}
 
+                                            {/* New custom shift form */}
                                             <div className="bg-gray-100 dark:bg-gray-700/30 p-3 rounded border border-gray-300 dark:border-gray-700 space-y-2">
                                                 <input
                                                     type="text"
