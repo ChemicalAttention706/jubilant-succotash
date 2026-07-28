@@ -64,6 +64,9 @@
         const OPENING_SHIFTS = ['COORD_WC_A', 'COORD_PC_A', 'PREP_A', 'WC_A'];
         const CLOSING_SHIFTS = ['WC_C']; 
 
+        // Fix #1: Prevent recreation of empty objects to stabilize useMemo references
+        const EMPTY_SCHEDULE = {};
+
         const safeSetItem = (key, value) => {
             try {
                 localStorage.setItem(key, value);
@@ -145,7 +148,10 @@
             const [activeGridTab, setActiveGridTab] = useState('COORD');
             
             const [newStudentRole, setNewStudentRole] = useState("GENERAL");
+            
+            // Fix #4: Use local state for the edit modal to prevent UI input lag
             const [editingStudentId, setEditingStudentId] = useState(null); 
+            const [editFormData, setEditFormData] = useState(null);
             
             const [confirmDialog, setConfirmDialog] = useState(null);
             const [infoDialog, setInfoDialog] = useState(null);
@@ -154,7 +160,8 @@
                 name: '', startHour: 9, endHour: 12, days: [] 
             });
 
-            const schedule = schedules[currentWeek] || {};
+            // Use the constant to prevent memory reference churn
+            const schedule = schedules[currentWeek] || EMPTY_SCHEDULE;
 
             const ALL_SHIFTS = useMemo(() => [
                 ...SHIFTS.COORD, ...SHIFTS.PREP, ...SHIFTS.WC, ...customShifts
@@ -176,6 +183,17 @@
                 end.setDate(end.getDate() + 6);
                 const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 return `${fmt(start)} – ${fmt(end)}`;
+            };
+
+            const getColumnDate = (dayName, weekNum = currentWeek) => {
+                const baseDateStr = weekDates[weekNum];
+                if (!baseDateStr) return dayName;
+                const dayIndex = DAYS.indexOf(dayName);
+                if (dayIndex === -1) return dayName;
+                const d = new Date(baseDateStr + 'T00:00:00');
+                d.setDate(d.getDate() + dayIndex);
+                const formattedDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                return `${dayName} (${formattedDate})`;
             };
 
             const promptConfirm = (title, message, actionText, actionFn, isDestructive = true) => {
@@ -204,9 +222,45 @@
                             });
                             return updatedSchedules;
                         });
-                        if (editingStudentId === idToRemove) setEditingStudentId(null);
+                        if (editingStudentId === idToRemove) {
+                            setEditingStudentId(null);
+                            setEditFormData(null);
+                        }
                     }
                 );
+            };
+
+            // Fix #2: Ghost Shifts on save logic
+            const handleSaveProfile = () => {
+                if (!editingStudentId || !editFormData) return;
+                const student = students.find(s => s.id === editingStudentId);
+                if (!student) return;
+
+                const oldRole = student.role;
+                const newRole = editFormData.role;
+
+                setStudents(prev => prev.map(s => s.id === editingStudentId ? {...s, name: editFormData.name, role: newRole} : s));
+
+                if (oldRole === 'COORDINATOR' && newRole === 'GENERAL') {
+                    setSchedules(prevSchedules => {
+                        const updated = { ...prevSchedules };
+                        Object.keys(updated).forEach(weekNum => {
+                            const weekSched = { ...updated[weekNum] };
+                            Object.keys(weekSched).forEach(slotId => {
+                                const shiftId = slotId.split('::')[1];
+                                const isCoordShift = SHIFTS.COORD.some(c => c.id === shiftId);
+                                if (isCoordShift) {
+                                    weekSched[slotId] = weekSched[slotId].filter(id => id !== editingStudentId);
+                                }
+                            });
+                            updated[weekNum] = weekSched;
+                        });
+                        return updated;
+                    });
+                }
+                
+                setEditingStudentId(null);
+                setEditFormData(null);
             };
 
             const handleClearRoster = () => {
@@ -219,6 +273,7 @@
                         setSchedules({ 1: {} });
                         setCurrentWeek(1);
                         setEditingStudentId(null);
+                        setEditFormData(null);
                     }
                 );
             };
@@ -522,9 +577,10 @@
                     const weekSched = schedules[weekNum] || {};
                     const weekLabel = weekDates[weekNum] ? ` (${formatDateRange(weekDates[weekNum])})` : '';
                     rows.push([`--- WEEK ${weekNum}${weekLabel} SCHEDULE ---`]);
-                    rows.push(["Day", "Track", "Shift", "Assigned Students"]);
+                    rows.push(["Day", "Date", "Track", "Shift", "Assigned Students"]);
                     
                     DAYS.forEach(day => {
+                        const formattedDayDate = getColumnDate(day, weekNum);
                         ALL_SHIFTS.forEach(shift => {
                             if (shift.track === 'CUSTOM' && shift.days && !shift.days.includes(day)) {
                                 return; 
@@ -536,7 +592,7 @@
                                 const avg = globalStats[id] ? globalStats[id].rollingAvg : "0.0";
                                 return s ? `${s.name} (${avg}h)` : "";
                             }).filter(n => n).join(", ");
-                            rows.push([day, shift.track, shift.name, studentNames]);
+                            rows.push([day, formattedDayDate, shift.track, shift.name, studentNames]);
                         });
                     });
                     
@@ -676,14 +732,12 @@
                                         const byName = new Map(prev.map(s => [s.name.toLowerCase().trim(), s]));
                                         const incoming = new Map(dedupedStudents.map(s => [s.name.toLowerCase().trim(), s]));
 
-                                        // Update existing students' availability
                                         const updatedList = prev.map(s => {
                                             const match = incoming.get(s.name.toLowerCase().trim());
                                             if (match) return { ...s, unavailable: match.unavailable };
                                             return s;
                                         });
 
-                                        // Add brand new students
                                         const newStudentsList = dedupedStudents.filter(s => !byName.has(s.name.toLowerCase().trim()));
                                         return [...updatedList, ...newStudentsList];
                                     });
@@ -876,38 +930,37 @@
                         <div>
                             <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Summer Staff Scheduler</h1>
                             <div className="flex items-center gap-4 mt-2">
-                                <div className="flex flex-col gap-1">
-                                    <div className="flex items-center bg-gray-100 dark:bg-gray-900 rounded-lg p-1 border border-gray-300 dark:border-gray-700 shadow-inner">
-                                        <button onClick={() => setCurrentWeek(Math.max(1, currentWeek - 1))} disabled={currentWeek === 1} className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm disabled:opacity-50">←</button>
-                                        <span className="px-4 font-bold text-blue-600 dark:text-blue-400">Week {currentWeek}</span>
-                                        <button onClick={() => {
-                                            if (!schedules[currentWeek + 1]) setSchedules({...schedules, [currentWeek + 1]: {}});
-                                            if (!weekDates[currentWeek + 1] && weekDates[currentWeek]) {
-                                                const next = new Date(weekDates[currentWeek] + 'T00:00:00');
-                                                next.setDate(next.getDate() + 7);
-                                                const yyyy = next.getFullYear();
-                                                const mm = String(next.getMonth() + 1).padStart(2, '0');
-                                                const dd = String(next.getDate()).padStart(2, '0');
-                                                setWeekDates(prev => ({...prev, [currentWeek + 1]: `${yyyy}-${mm}-${dd}`}));
-                                            }
-                                            setCurrentWeek(currentWeek + 1);
-                                        }} className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm">→</button>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        {weekDates[currentWeek] ? (
-                                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                                                📅 {formatDateRange(weekDates[currentWeek])}
-                                            </span>
-                                        ) : (
-                                            <span className="text-xs text-gray-400 dark:text-gray-500 italic">No date set</span>
-                                        )}
-                                        <input
-                                            type="date"
-                                            value={weekDates[currentWeek] || ''}
-                                            onChange={(e) => setWeekDates(prev => ({...prev, [currentWeek]: e.target.value}))}
-                                            className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 outline-none"
-                                        />
-                                    </div>
+                                <div className="flex items-center bg-gray-100 dark:bg-gray-900 rounded-lg p-1 border border-gray-300 dark:border-gray-700 shadow-inner">
+                                    <button onClick={() => setCurrentWeek(Math.max(1, currentWeek - 1))} disabled={currentWeek === 1} className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm disabled:opacity-50">←</button>
+                                    <span className="px-4 font-bold text-blue-600 dark:text-blue-400">Week {currentWeek}</span>
+                                    <button onClick={() => {
+                                        if (!schedules[currentWeek + 1]) setSchedules({...schedules, [currentWeek + 1]: {}});
+                                        if (!weekDates[currentWeek + 1] && weekDates[currentWeek]) {
+                                            const next = new Date(weekDates[currentWeek] + 'T00:00:00');
+                                            next.setDate(next.getDate() + 7);
+                                            const yyyy = next.getFullYear();
+                                            const mm = String(next.getMonth() + 1).padStart(2, '0');
+                                            const dd = String(next.getDate()).padStart(2, '0');
+                                            setWeekDates(prev => ({...prev, [currentWeek + 1]: `${yyyy}-${mm}-${dd}`}));
+                                        }
+                                        setCurrentWeek(currentWeek + 1);
+                                    }} className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm">→</button>
+                                </div>
+                                
+                                <div className="flex items-center gap-2">
+                                    {weekDates[currentWeek] ? (
+                                        <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                                            📅 {formatDateRange(weekDates[currentWeek])}
+                                        </span>
+                                    ) : (
+                                        <span className="text-sm text-gray-400 dark:text-gray-500 italic">No date set</span>
+                                    )}
+                                    <input
+                                        type="date"
+                                        value={weekDates[currentWeek] || ''}
+                                        onChange={(e) => setWeekDates(prev => ({...prev, [currentWeek]: e.target.value}))}
+                                        className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 outline-none cursor-pointer"
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -949,7 +1002,7 @@
                                     <thead className="sticky top-0 z-20 shadow-sm">
                                         <tr>
                                             <th className="p-3 border-b border-r border-gray-300 dark:border-gray-700 bg-gray-200 dark:bg-gray-900 text-gray-800 dark:text-gray-300">Shift</th>
-                                            {DAYS.map(day => <th key={day} className="p-3 border-b border-l border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-900/80 font-medium text-gray-700 dark:text-gray-300">{day}</th>)}
+                                            {DAYS.map(day => <th key={day} className="p-3 border-b border-l border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-900/80 font-medium text-gray-700 dark:text-gray-300">{getColumnDate(day)}</th>)}
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1031,7 +1084,10 @@
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-3">
-                                                            <button onClick={() => setEditingStudentId(s.id)} className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline">Edit</button>
+                                                            <button onClick={() => { 
+                                                                setEditingStudentId(s.id); 
+                                                                setEditFormData({ name: s.name, role: s.role }); 
+                                                            }} className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline">Edit</button>
                                                             <button onClick={() => handleDeleteStudent(s.id)} className="text-xs text-red-500 hover:text-red-700 bg-white dark:bg-gray-800 border border-red-200 dark:border-red-900/50 rounded-full w-5 h-5 flex items-center justify-center" title="Remove Student">✕</button>
                                                         </div>
                                                     </div>
@@ -1057,7 +1113,10 @@
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-3">
-                                                            <button onClick={() => setEditingStudentId(s.id)} className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline">Edit</button>
+                                                            <button onClick={() => { 
+                                                                setEditingStudentId(s.id); 
+                                                                setEditFormData({ name: s.name, role: s.role }); 
+                                                            }} className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline">Edit</button>
                                                             <button onClick={() => handleDeleteStudent(s.id)} className="text-xs text-red-500 hover:text-red-700 bg-white dark:bg-gray-800 border border-red-200 dark:border-red-900/50 rounded-full w-5 h-5 flex items-center justify-center" title="Remove Student">✕</button>
                                                         </div>
                                                     </div>
@@ -1110,7 +1169,7 @@
                                             Adjust these variables to modify the Auto-Assigner's logic constraints.<br/><br/>
                                             <strong>Scheduling Protocols:</strong><br/>
                                             • The Auto-Assigner will strictly skip weekend prep shifts, letting you assign them manually via the dashboard dropdown only.<br/>
-                                            • General Staff are strictly blocked from working > 3 consecutive days across weeks.<br/>
+                                            • General Staff are strictly blocked from working &gt; 3 consecutive days across weeks.<br/>
                                             • Coordinators are strictly limited to one shift per day and balanced between WC and Prep roles.
                                         </div>
                                         <div>
@@ -1129,7 +1188,6 @@
                                         <div className="border-t border-gray-300 dark:border-gray-700 pt-4 mt-4">
                                             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Custom Shifts</div>
 
-                                            {/* Existing custom shifts list */}
                                             {customShifts.length > 0 && (
                                                 <div className="space-y-2 mb-4">
                                                     {customShifts.map(shift => {
@@ -1171,7 +1229,6 @@
                                                 </div>
                                             )}
 
-                                            {/* New custom shift form */}
                                             <div className="bg-gray-100 dark:bg-gray-700/30 p-3 rounded border border-gray-300 dark:border-gray-700 space-y-2">
                                                 <input
                                                     type="text"
@@ -1232,6 +1289,11 @@
                                                     onClick={() => {
                                                         const name = newCustomShift.name.trim();
                                                         if (!name) { promptInfo("Invalid", "Please enter a shift name."); return; }
+                                                        // Fix #3: Duplicate Custom Shift validation
+                                                        if (customShifts.some(s => s.name.toLowerCase() === name.toLowerCase())) {
+                                                            promptInfo("Duplicate", "A special shift with this exact name already exists.");
+                                                            return;
+                                                        }
                                                         if (newCustomShift.startHour >= newCustomShift.endHour) { promptInfo("Invalid", "End time must be after start time."); return; }
                                                         if (newCustomShift.days.length === 0) { promptInfo("Invalid", "Please select at least one active day."); return; }
                                                         setCustomShifts(prev => [...prev, {
@@ -1258,24 +1320,23 @@
                         </div>
                     </div>
 
-                    {/* Editor Modal */}
-                    {editingStudentId && editingStudent && (
+                    {editingStudentId && editingStudent && editFormData && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-40 p-4">
                             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl flex flex-col max-h-[90vh] border border-gray-300 dark:border-gray-700">
                                 <div className="p-4 border-b border-gray-300 dark:border-gray-700 flex justify-between items-center bg-gray-100 dark:bg-gray-900 rounded-t-lg">
-                                    <h2 className="text-lg font-bold">Edit Profile: {editingStudent.name}</h2>
-                                    <button onClick={() => setEditingStudentId(null)} className="text-gray-500 hover:text-gray-700">✕</button>
+                                    <h2 className="text-lg font-bold">Edit Profile: {editFormData.name}</h2>
+                                    <button onClick={() => { setEditingStudentId(null); setEditFormData(null); }} className="text-gray-500 hover:text-gray-700">✕</button>
                                 </div>
                                 
                                 <div className="p-4 overflow-y-auto space-y-4">
                                     <div className="flex gap-4">
                                         <div className="flex-1">
                                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Name</label>
-                                            <input type="text" value={editingStudent.name} onChange={(e) => setStudents(students.map(s => s.id === editingStudentId ? {...s, name: e.target.value} : s))} className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 bg-white dark:bg-gray-700 outline-none" />
+                                            <input type="text" value={editFormData.name} onChange={(e) => setEditFormData({...editFormData, name: e.target.value})} className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 bg-white dark:bg-gray-700 outline-none" />
                                         </div>
                                         <div className="w-48">
                                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Role</label>
-                                            <select value={editingStudent.role} onChange={(e) => setStudents(students.map(s => s.id === editingStudentId ? {...s, role: e.target.value} : s))} className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 bg-white dark:bg-gray-700 outline-none">
+                                            <select value={editFormData.role} onChange={(e) => setEditFormData({...editFormData, role: e.target.value})} className="w-full border border-gray-300 dark:border-gray-600 rounded p-2 bg-white dark:bg-gray-700 outline-none">
                                                 <option value="GENERAL">General Staff</option>
                                                 <option value="COORDINATOR">Coordinator</option>
                                             </select>
@@ -1338,13 +1399,12 @@
                                     </div>
                                 </div>
                                 <div className="p-4 border-t border-gray-300 dark:border-gray-700 flex justify-end bg-gray-100 dark:bg-gray-900 rounded-b-lg">
-                                    <button onClick={() => setEditingStudentId(null)} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium shadow-sm">Done</button>
+                                    <button onClick={handleSaveProfile} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium shadow-sm">Done</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* Custom Confirmation Modal */}
                     {confirmDialog && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
                             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-300 dark:border-gray-700 max-w-md w-full">
@@ -1365,7 +1425,6 @@
                         </div>
                     )}
 
-                    {/* Info Modal */}
                     {infoDialog && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
                             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-300 dark:border-gray-700 max-w-md w-full">
