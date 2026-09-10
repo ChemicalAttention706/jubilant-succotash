@@ -62,14 +62,14 @@
         };
 
         const OPENING_SHIFTS = ['COORD_WC_A', 'COORD_PC_A', 'PREP_A', 'WC_A'];
-        const CLOSING_SHIFTS = ['WC_C']; 
+        const CLOSING_SHIFTS = ['WC_C'];
 
         const EMPTY_SCHEDULE = {};
 
         const getSunday = (dateStr) => {
             if (!dateStr) return '';
             const d = new Date(dateStr + 'T00:00:00');
-            const day = d.getDay(); 
+            const day = d.getDay();
             d.setDate(d.getDate() - day);
             const yyyy = d.getFullYear();
             const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -116,14 +116,14 @@
 
             const [targets, setTargets] = useState(() => {
                 const defaultTargets = {
-                    COORD_WC_A: { weekday: 1, weekend: 1 }, 
-                    COORD_WC_B: { weekday: 1, weekend: 1 }, 
-                    COORD_PC_A: { weekday: 1, weekend: 0 }, 
-                    COORD_PC_B: { weekday: 1, weekend: 0 }, 
-                    PREP_A: { weekday: 5, weekend: 0 }, 
-                    PREP_B: { weekday: 5, weekend: 0 }, 
-                    WC_A: { weekday: 2, weekend: 2 }, 
-                    WC_B: { weekday: 2, weekend: 2 }, 
+                    COORD_WC_A: { weekday: 1, weekend: 1 },
+                    COORD_WC_B: { weekday: 1, weekend: 1 },
+                    COORD_PC_A: { weekday: 1, weekend: 0 },
+                    COORD_PC_B: { weekday: 1, weekend: 0 },
+                    PREP_A: { weekday: 5, weekend: 0 },
+                    PREP_B: { weekday: 5, weekend: 0 },
+                    WC_A: { weekday: 2, weekend: 2 },
+                    WC_B: { weekday: 2, weekend: 2 },
                     WC_C: { weekday: 3, weekend: 3 }
                 };
                 try {
@@ -154,20 +154,21 @@
             });
 
             const [currentWeek, setCurrentWeek] = useState(1);
-            const [activeTab, setActiveTab] = useState('roster'); 
+            const [activeTab, setActiveTab] = useState('roster');
             const [activeGridTab, setActiveGridTab] = useState('COORD');
-            
+
             const [newStudentRole, setNewStudentRole] = useState("GENERAL");
-            
-            const [editingStudentId, setEditingStudentId] = useState(null); 
+
+            const [editingStudentId, setEditingStudentId] = useState(null);
             const [editFormData, setEditFormData] = useState(null);
-            
+
             const [confirmDialog, setConfirmDialog] = useState(null);
             const [infoDialog, setInfoDialog] = useState(null);
             const [openDropdown, setOpenDropdown] = useState(null);
-            const [newCustomShift, setNewCustomShift] = useState({ 
-                name: '', startHour: 9, endHour: 12, days: [] 
+            const [newCustomShift, setNewCustomShift] = useState({
+                name: '', startHour: 9, endHour: 12, days: []
             });
+            const [newVacation, setNewVacation] = useState({ start: '', end: '' });
 
             const schedule = schedules[currentWeek] || EMPTY_SCHEDULE;
 
@@ -204,6 +205,19 @@
                 return `${dayName} (${formattedDate})`;
             };
 
+            const getCalendarDate = (dayName, weekNum = currentWeek) => {
+                const baseDateStr = weekDates[weekNum];
+                if (!baseDateStr) return null;
+                const dayIndex = DAYS.indexOf(dayName);
+                if (dayIndex === -1) return null;
+                const d = new Date(baseDateStr + 'T00:00:00');
+                d.setDate(d.getDate() + dayIndex);
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                return `${yyyy}-${mm}-${dd}`;
+            };
+
             const promptConfirm = (title, message, actionText, actionFn, isDestructive = true) => {
                 setConfirmDialog({ title, message, actionText, actionFn, isDestructive });
             };
@@ -214,7 +228,7 @@
 
             const handleDeleteStudent = (idToRemove) => {
                 promptConfirm(
-                    "Remove Student", 
+                    "Remove Student",
                     "Are you sure you want to remove this student? This will also remove them from all active schedules.",
                     "Remove Student",
                     () => {
@@ -265,7 +279,7 @@
                         return updated;
                     });
                 }
-                
+
                 setEditingStudentId(null);
                 setEditFormData(null);
             };
@@ -288,15 +302,15 @@
             const globalStats = useMemo(() => {
                 const stats = {};
                 students.forEach(s => stats[s.id] = { ...s, totalHours: 0, activeWeeks: new Set(), wcShifts: 0, prepShifts: 0 });
-                
+
                 Object.entries(schedules).forEach(([weekNum, weekSched]) => {
                     Object.entries(weekSched).forEach(([slotId, assignedIds]) => {
                         const parts = slotId.split('::');
                         if (parts.length < 2) return;
                         const shiftId = parts[1];
                         const shiftType = ALL_SHIFTS.find(s => s.id === shiftId);
-                        const shiftHours = shiftType ? shiftType.hours : 0; 
-                        
+                        const shiftHours = shiftType ? shiftType.hours : 0;
+
                         assignedIds.forEach(id => {
                             if (stats[id]) {
                                 stats[id].totalHours += shiftHours;
@@ -314,7 +328,7 @@
                     Object.keys(schedules).filter(w => Object.keys(schedules[w]).length > 0).length,
                     1
                 );
-                
+
                 Object.keys(stats).forEach(id => {
                     stats[id].rollingAvg = (stats[id].totalHours / totalWeeks).toFixed(1);
                 });
@@ -333,8 +347,8 @@
                     if (parts.length < 2) return;
                     const shiftId = parts[1];
                     const shiftType = ALL_SHIFTS.find(s => s.id === shiftId);
-                    const shiftHours = shiftType ? shiftType.hours : 0; 
-                    
+                    const shiftHours = shiftType ? shiftType.hours : 0;
+
                     assignedIds.forEach(id => {
                         if (stats[id]) {
                             stats[id].currentHours += shiftHours;
@@ -350,27 +364,26 @@
             const generalCount = students.filter(s => s.role === 'GENERAL').length;
 
             const checkShiftRelationship = (day, studentId, targetShift, tempSchedule) => {
-                const studentShifts = ALL_SHIFTS.filter(s => 
+                const studentShifts = ALL_SHIFTS.filter(s =>
                     s.id !== targetShift.id && (tempSchedule[`${day}::${s.id}`] || []).includes(studentId)
                 );
-                
+
                 let hardOverlap = false;
                 let b2b = false;
 
                 for (const s of studentShifts) {
                     if (s.startHour < targetShift.endHour && s.endHour > targetShift.startHour) {
                         hardOverlap = true;
-                    } 
-                    else if (s.endHour === targetShift.startHour || s.startHour === targetShift.endHour) {
+                    } else if (s.endHour === targetShift.startHour || s.startHour === targetShift.endHour) {
                         b2b = true;
                     }
                 }
-                
+
                 return { hardOverlap, b2b };
             };
 
             const isTooManyConsecutiveDays = (targetDay, studentId, role, tempSchedule, allSchedules, weekNum) => {
-                if (role !== 'GENERAL') return false; 
+                if (role !== 'GENERAL') return false;
                 const prevSched = allSchedules[weekNum - 1] || {};
                 const nextSched = allSchedules[weekNum + 1] || {};
                 const worksOnDay = (d, sched) => Object.keys(sched).some(slot => slot.startsWith(`${d}::`) && (sched[slot] || []).includes(studentId));
@@ -395,7 +408,7 @@
 
             const isClopening = (day, studentId, targetShiftId, tempSchedule, prevWeekSchedule = {}, nextWeekSchedule = {}) => {
                 const dayIndex = DAYS.indexOf(day);
-                
+
                 if (OPENING_SHIFTS.includes(targetShiftId)) {
                     if (dayIndex > 0) {
                         const prevDay = DAYS[dayIndex - 1];
@@ -404,7 +417,7 @@
                         if (CLOSING_SHIFTS.some(closer => (prevWeekSchedule[`Saturday::${closer}`] || []).includes(studentId))) return true;
                     }
                 }
-                
+
                 if (CLOSING_SHIFTS.includes(targetShiftId)) {
                     if (dayIndex < 6) {
                         const nextDay = DAYS[dayIndex + 1];
@@ -413,7 +426,7 @@
                         if (OPENING_SHIFTS.some(opener => (nextWeekSchedule[`Sunday::${opener}`] || []).includes(studentId))) return true;
                     }
                 }
-                
+
                 return false;
             };
 
@@ -423,7 +436,7 @@
 
                 const isAlreadyAssigned = (tempSchedule[`${day}::${shift.id}`] || []).includes(student.id);
                 const wouldExceed = stats.currentHours + shift.hours > currentSettings.maxHours;
-                
+
                 const unavailable = student.unavailable || [];
                 const isUnavailable = Array.from(
                     { length: shift.endHour - shift.startHour },
@@ -431,11 +444,14 @@
                 ).some(h => unavailable.includes(`${day}::${h}`));
 
                 const { hardOverlap, b2b } = checkShiftRelationship(day, student.id, shift, tempSchedule);
-                
+
+                const calDate = getCalendarDate(day, weekNum);
+                const isOnVacation = calDate ? (student.vacations || []).some(v => calDate >= v.start && calDate <= v.end) : false;
+
                 const prevWeekSchedule = allSchedules[weekNum - 1] || {};
                 const nextWeekSchedule = allSchedules[weekNum + 1] || {};
                 const clopening = isClopening(day, student.id, shift.id, tempSchedule, prevWeekSchedule, nextWeekSchedule);
-                
+
                 const overDays = isTooManyConsecutiveDays(day, student.id, student.role, tempSchedule, allSchedules, weekNum);
 
                 let isDailyCoordLimitReached = false;
@@ -446,10 +462,10 @@
                     }
                 }
 
-                const isDisabled = isAlreadyAssigned || wouldExceed || isUnavailable || hardOverlap || clopening || overDays || isDailyCoordLimitReached;
+                const isDisabled = isAlreadyAssigned || wouldExceed || isUnavailable || isOnVacation || hardOverlap || clopening || overDays || isDailyCoordLimitReached;
                 const isAutoEligible = !isDisabled && !b2b;
 
-                return { wouldExceed, isUnavailable, hardOverlap, clopening, b2b, overDays, isDailyCoordLimitReached, isDisabled, isAutoEligible };
+                return { wouldExceed, isUnavailable, isOnVacation, hardOverlap, clopening, b2b, overDays, isDailyCoordLimitReached, isDisabled, isAutoEligible };
             };
 
             const slotEligibility = useMemo(() => {
@@ -478,12 +494,12 @@
 
             const handleAutoAssign = () => {
                 let newSchedule = { ...schedule };
-                
+
                 let currentStats = {};
                 Object.keys(studentStats).forEach(id => {
                     currentStats[id] = { ...studentStats[id] };
                 });
-                
+
                 const fillPass = (shiftGroup) => {
                     let slotsToFill = [];
                     DAYS.forEach(day => {
@@ -505,11 +521,10 @@
 
                     slotsToFill.forEach(({day, shift}) => {
                         const slotId = `${day}::${shift.id}`;
-                        
+
                         let eligible = students.filter(s => {
                             const stats = currentStats[s.id];
                             if (!stats) return false;
-                            
                             const eligibility = getStudentEligibility(s, day, shift, newSchedule, schedules, currentWeek, stats, settings);
                             return eligibility.isAutoEligible;
                         });
@@ -518,11 +533,11 @@
                             eligible.sort((a, b) => {
                                 const statsA = currentStats[a.id];
                                 const statsB = currentStats[b.id];
-                                
+
                                 if (shift.track === 'COORDINATOR') {
                                     const totalA = statsA.wcShifts + statsA.prepShifts || 1;
                                     const totalB = statsB.wcShifts + statsB.prepShifts || 1;
-                                    
+
                                     if (shift.subTrack === 'PREP') {
                                         const ratioA = statsA.prepShifts / totalA;
                                         const ratioB = statsB.prepShifts / totalB;
@@ -533,20 +548,20 @@
                                         if (Math.abs(ratioA - ratioB) > 0.05) return ratioA - ratioB;
                                     }
                                 }
-                                
+
                                 const aUnderTarget = statsA.currentHours < 15;
                                 const bUnderTarget = statsB.currentHours < 15;
-                                
-                                if (aUnderTarget && !bUnderTarget) return -1; 
-                                if (!aUnderTarget && bUnderTarget) return 1;  
-                                
+
+                                if (aUnderTarget && !bUnderTarget) return -1;
+                                if (!aUnderTarget && bUnderTarget) return 1;
+
                                 if (statsA.currentHours !== statsB.currentHours) {
                                     return statsA.currentHours - statsB.currentHours;
                                 }
-                                
+
                                 const aShiftsToday = ALL_SHIFTS.filter(sh => (newSchedule[`${day}::${sh.id}`] || []).includes(a.id)).length;
                                 const bShiftsToday = ALL_SHIFTS.filter(sh => (newSchedule[`${day}::${sh.id}`] || []).includes(b.id)).length;
-                                
+
                                 const todayDiff = aShiftsToday - bShiftsToday;
                                 if (todayDiff !== 0) return todayDiff;
 
@@ -577,33 +592,33 @@
                     if (/^[=+\-@]/.test(safeStr)) safeStr = "'" + safeStr;
                     return `"${safeStr}"`;
                 };
-                
+
                 const weeksToExport = allWeeks ? Object.keys(schedules).sort((a,b) => parseInt(a) - parseInt(b)) : [currentWeek];
-                
+
                 weeksToExport.forEach(weekNum => {
                     const weekSched = schedules[weekNum] || {};
                     const weekLabel = weekDates[weekNum] ? ` (${formatDateRange(weekDates[weekNum])})` : '';
                     rows.push([`--- WEEK ${weekNum}${weekLabel} SCHEDULE ---`]);
                     rows.push(["Day", "Date", "Track", "Shift", "Assigned Students"]);
-                    
+
                     DAYS.forEach(day => {
                         const formattedDayDate = getColumnDate(day, weekNum);
                         ALL_SHIFTS.forEach(shift => {
                             if (shift.track === 'CUSTOM' && shift.days && !shift.days.includes(day)) {
-                                return; 
+                                return;
                             }
                             const slotId = `${day}::${shift.id}`;
                             const assignedIds = weekSched[slotId] || [];
                             const studentNames = assignedIds.map(id => {
-                                const s = students.find(st => st.id === id); 
+                                const s = students.find(st => st.id === id);
                                 const avg = globalStats[id] ? globalStats[id].rollingAvg : "0.0";
                                 return s ? `${s.name} (${avg}h)` : "";
                             }).filter(n => n).join(", ");
                             rows.push([day, formattedDayDate, shift.track, shift.name, studentNames]);
                         });
                     });
-                    
-                    rows.push([]); 
+
+                    rows.push([]);
                 });
 
                 const blob = new Blob([rows.map(r => r.map(escapeCSV).join(",")).join("\n")], { type: 'text/csv;charset=utf-8;' });
@@ -620,7 +635,7 @@
                 reader.onload = (event) => {
                     try {
                         const text = event.target.result;
-                        
+
                         const parseCSV = (str) => {
                             const result = [];
                             let row = [];
@@ -629,14 +644,14 @@
                             for (let i = 0; i < str.length; i++) {
                                 const char = str[i];
                                 if (char === '"' && str[i+1] === '"') {
-                                    cell += '"'; i++; 
+                                    cell += '"'; i++;
                                 } else if (char === '"') {
                                     inQuotes = !inQuotes;
                                 } else if (char === ',' && !inQuotes) {
                                     row.push(cell.trim());
                                     cell = '';
                                 } else if ((char === '\n' || char === '\r') && !inQuotes) {
-                                    if (char === '\r' && str[i+1] === '\n') i++; 
+                                    if (char === '\r' && str[i+1] === '\n') i++;
                                     row.push(cell.trim());
                                     if (row.some(c => c !== '')) result.push(row);
                                     row = [];
@@ -659,13 +674,13 @@
                         }
 
                         const headers = rows[0];
-                        
+
                         const nameIdx = headers.findIndex(h => {
                             const lower = h.toLowerCase();
                             return lower.includes('name') || (lower.includes('first') && lower.includes('last'));
                         });
                         const roleIdx = headers.findIndex(h => h.toLowerCase().includes('role'));
-                        
+
                         if (nameIdx === -1 || roleIdx === -1) {
                             promptInfo("Error", "Could not find 'Name' or 'Role' columns. Are you sure this is the right Google Form CSV?");
                             return;
@@ -682,13 +697,13 @@
 
                         const newStudents = rows.slice(1).map((cols) => {
                             const name = cols[nameIdx];
-                            if (!name) return null; 
-                            
+                            if (!name) return null;
+
                             const roleStr = cols[roleIdx]?.toUpperCase() || "";
                             const role = roleStr.includes('COORDINATOR') ? 'COORDINATOR' : 'GENERAL';
-                            
+
                             let unavailable = [];
-                            
+
                             dayCols.forEach(({ index, day }) => {
                                 const cellValue = cols[index];
                                 if (cellValue) {
@@ -712,7 +727,7 @@
                             });
 
                             return { id: generateId(), name, role, unavailable };
-                        }).filter(Boolean).filter(s => !s.name.includes("Example")); 
+                        }).filter(Boolean).filter(s => !s.name.includes("Example"));
 
                         const seen = new Map();
                         newStudents.forEach(s => seen.set(s.name.toLowerCase().trim(), s));
@@ -721,7 +736,7 @@
                         if (dedupedStudents.length > 0) {
                             const dupCount = newStudents.length - dedupedStudents.length;
                             const dupNote = dupCount > 0 ? ` (${dupCount} duplicate submission${dupCount > 1 ? 's' : ''} removed)` : '';
-                            
+
                             const existingByName = new Map(students.map(s => [s.name.toLowerCase().trim(), s]));
 
                             let updated = 0, added = 0;
@@ -758,7 +773,7 @@
                         console.error(error);
                         promptInfo("Error", "Error parsing CSV. Ensure it is the direct Google Form download.");
                     } finally {
-                        if (fileInputRef.current) fileInputRef.current.value = ''; 
+                        if (fileInputRef.current) fileInputRef.current.value = '';
                     }
                 };
                 reader.readAsText(file);
@@ -768,11 +783,11 @@
                 const student = students.find(s => s.id === studentId);
                 if (!student) return;
                 const isUnavailable = (student.unavailable || []).includes(slotId);
-                
+
                 setStudents(students.map(s => {
                     if (s.id === studentId) {
-                        return isUnavailable 
-                            ? { ...s, unavailable: (s.unavailable || []).filter(u => u !== slotId) } 
+                        return isUnavailable
+                            ? { ...s, unavailable: (s.unavailable || []).filter(u => u !== slotId) }
                             : { ...s, unavailable: [...(s.unavailable || []), slotId] };
                     }
                     return s;
@@ -782,15 +797,15 @@
             const toggleCustomShiftDay = (day) => {
                 setNewCustomShift(prev => ({
                     ...prev,
-                    days: prev.days.includes(day) 
-                        ? prev.days.filter(d => d !== day) 
+                    days: prev.days.includes(day)
+                        ? prev.days.filter(d => d !== day)
                         : [...prev.days, day]
                 }));
             };
 
             const renderShiftRow = (shift) => {
                 const targetObj = targets[shift.id] || { weekday: 0, weekend: 0 };
-                
+
                 return (
                     <tr key={shift.id}>
                         <td className="sticky left-0 z-10 p-3 border-b border-r border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] dark:shadow-[2px_0_5px_-2px_rgba(0,0,0,0.5)]">
@@ -818,12 +833,12 @@
                             const target = shift.track === 'CUSTOM' ? 0 : (isWeekend ? targetObj.weekend : targetObj.weekday);
                             const isMet = assigned.length >= target;
                             const isCoord = shift.track === 'COORDINATOR';
-                            
+
                             let cellBg = '';
                             if (target > 0) {
                                 if (isMet) cellBg = 'bg-green-50/40 dark:bg-green-900/10';
-                                else if (isCoord) cellBg = 'bg-red-50/60 dark:bg-red-900/20'; 
-                                else cellBg = 'bg-orange-50/40 dark:bg-orange-900/10'; 
+                                else if (isCoord) cellBg = 'bg-red-50/60 dark:bg-red-900/20';
+                                else cellBg = 'bg-orange-50/40 dark:bg-orange-900/10';
                             }
 
                             const slotEntries = slotEligibility[slotId] || [];
@@ -838,73 +853,82 @@
                                         )}
                                         {assigned.map(studentId => {
                                             const student = students.find(s => s.id === studentId);
-                                            if(!student) return null;
-                                            
+                                            if (!student) return null;
+
                                             const { hardOverlap, b2b } = checkShiftRelationship(day, studentId, shift, schedule);
                                             const isUnavailable = Array.from(
                                                 { length: shift.endHour - shift.startHour },
                                                 (_, i) => shift.startHour + i
                                             ).some(h => (student.unavailable || []).includes(`${day}::${h}`));
-                                            
+
+                                            const calDate = getCalendarDate(day);
+                                            const isOnVacation = calDate ? (student.vacations || []).some(v => calDate >= v.start && calDate <= v.end) : false;
+
                                             const hasConflict = hardOverlap;
                                             const hasTimeOff = isUnavailable;
+                                            const hasVacation = isOnVacation;
                                             const hasB2B = b2b;
 
                                             let borderClass = 'border-gray-300 dark:border-gray-600';
                                             let bgClass = isCoord ? 'bg-amber-50 dark:bg-amber-900/30' : 'bg-white dark:bg-gray-700';
-                                            
+
                                             if (hasConflict) {
                                                 borderClass = 'border-red-500 shadow-[0_0_0_1px_#ef4444] dark:border-red-500';
                                                 bgClass = 'bg-red-50 dark:bg-red-900/40';
                                             } else if (hasTimeOff) {
                                                 borderClass = 'border-purple-500 shadow-[0_0_0_1px_#a855f7] dark:border-purple-500';
                                                 bgClass = 'bg-purple-50 dark:bg-purple-900/40';
+                                            } else if (hasVacation) {
+                                                borderClass = 'border-sky-400 shadow-[0_0_0_1px_#38bdf8] dark:border-sky-500';
+                                                bgClass = 'bg-sky-50 dark:bg-sky-900/40';
                                             } else if (hasB2B) {
                                                 borderClass = 'border-amber-400 shadow-[0_0_0_1px_#fbbf24] dark:border-amber-500';
                                                 bgClass = 'bg-amber-50 dark:bg-amber-900/40';
                                             }
-                                            
+
                                             return (
                                                 <div key={studentId} className={`border rounded px-2 py-1.5 text-sm shadow-sm flex justify-between items-center group transition-colors ${bgClass} ${borderClass}`}>
                                                     <span className="truncate pr-2 dark:text-gray-200 flex items-center gap-1">
                                                         {student.name}
                                                         {hasConflict && <span title="Conflict: Double-booked hours" className="text-red-500 text-[10px]">🚨</span>}
                                                         {!hasConflict && hasTimeOff && <span title="Unavailable: Time-off requested" className="text-purple-500 text-[10px]">🛑</span>}
-                                                        {!hasConflict && !hasTimeOff && hasB2B && <span title="Double Shift (Back-to-Back)" className="text-amber-500 text-[10px]">⚠️</span>}
+                                                        {!hasConflict && !hasTimeOff && hasVacation && <span title="On vacation" className="text-sky-500 text-[10px]">✈️</span>}
+                                                        {!hasConflict && !hasTimeOff && !hasVacation && hasB2B && <span title="Double Shift (Back-to-Back)" className="text-amber-500 text-[10px]">⚠️</span>}
                                                     </span>
                                                     <button onClick={() => updateCurrentSchedule({...schedule, [slotId]: assigned.filter(id => id !== studentId)})} className="text-gray-400 hover:text-red-500">✕</button>
                                                 </div>
-                                            )
+                                            );
                                         })}
-                                        
+
                                         <div className="relative">
-                                            <button 
+                                            <button
                                                 onClick={() => setOpenDropdown(openDropdown === slotId ? null : slotId)}
                                                 className="text-xs text-left border border-gray-300 dark:border-gray-600 rounded p-1.5 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 outline-none w-full hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex justify-between items-center"
                                             >
                                                 <span>➕ Add...</span>
                                                 <span className="text-[10px] opacity-50">▼</span>
                                             </button>
-                                            
+
                                             {openDropdown === slotId && (
                                                 <>
                                                     <div className="fixed inset-0 z-30" onClick={() => setOpenDropdown(null)}></div>
                                                     <div className="absolute top-full left-0 mt-1 min-w-[200px] w-full max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-xl z-40">
                                                         {slotEntries.length === 0 ? (
                                                             <div className="p-2 text-xs text-gray-500 italic text-center">No available staff</div>
-                                                        ) : slotEntries.map(({ student: s, stats, wouldExceed, isUnavailable, hardOverlap, clopening, b2b, overDays, isDailyCoordLimitReached, isDisabled }) => {
+                                                        ) : slotEntries.map(({ student: s, stats, wouldExceed, isUnavailable, isOnVacation, hardOverlap, clopening, b2b, overDays, isDailyCoordLimitReached, isDisabled }) => {
                                                             let flag = "";
-                                                            if(wouldExceed) flag = " ⚠️ (Max Hrs)";
-                                                            else if(isUnavailable) flag = " 🛑 (Off)";
-                                                            else if(isDailyCoordLimitReached) flag = " ⚠️ (1/day Max)";
-                                                            else if(hardOverlap) flag = " 🚨 (Overlap)";
-                                                            else if(clopening) flag = " ⚠️ (Clopen)";
-                                                            else if(overDays) flag = " ⚠️ (>3 Days)";
-                                                            else if(b2b) flag = " ⚠️ (Double Shift)";
+                                                            if (wouldExceed) flag = " ⚠️ (Max Hrs)";
+                                                            else if (isUnavailable) flag = " 🛑 (Off)";
+                                                            else if (isOnVacation) flag = " ✈️ (Vacation)";
+                                                            else if (isDailyCoordLimitReached) flag = " ⚠️ (1/day Max)";
+                                                            else if (hardOverlap) flag = " 🚨 (Overlap)";
+                                                            else if (clopening) flag = " ⚠️ (Clopen)";
+                                                            else if (overDays) flag = " ⚠️ (>3 Days)";
+                                                            else if (b2b) flag = " ⚠️ (Double Shift)";
 
                                                             return (
-                                                                <button 
-                                                                    key={s.id} 
+                                                                <button
+                                                                    key={s.id}
                                                                     onClick={() => {
                                                                         updateCurrentSchedule({...schedule, [slotId]: Array.from(new Set([...assigned, s.id]))});
                                                                         setOpenDropdown(null);
@@ -913,7 +937,7 @@
                                                                 >
                                                                     {s.name} ({stats.currentHours}h){flag}
                                                                 </button>
-                                                            )
+                                                            );
                                                         })}
                                                     </div>
                                                 </>
@@ -921,7 +945,7 @@
                                         </div>
                                     </div>
                                 </td>
-                            )
+                            );
                         })}
                     </tr>
                 );
@@ -953,7 +977,7 @@
                                         setCurrentWeek(currentWeek + 1);
                                     }} className="px-3 py-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm">→</button>
                                 </div>
-                                
+
                                 <div className="flex items-center gap-2">
                                     {weekDates[currentWeek] ? (
                                         <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
@@ -986,26 +1010,26 @@
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div className="flex flex-wrap items-center gap-2">
                             <button onClick={() => setIsDarkMode(!isDarkMode)} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm h-[38px] w-[38px]">{isDarkMode ? '☀️' : '🌙'}</button>
                             <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1 hidden sm:block"></div>
-                            
+
                             <button onClick={() => fileInputRef.current.click()} className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm font-medium">📥 Import Google Form</button>
                             <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1 hidden sm:block"></div>
-                            
+
                             <button onClick={() => exportCSV(false)} className="px-3 py-2 border border-green-400 rounded text-green-700 bg-green-50 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400 text-sm font-medium">📤 Export Week</button>
                             <button onClick={() => exportCSV(true)} className="px-3 py-2 border border-green-400 rounded text-green-700 bg-green-50 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400 text-sm font-medium">📤 Export All</button>
                             <div className="w-px h-6 bg-gray-300 dark:bg-gray-600 mx-1 hidden sm:block"></div>
-                            
-                            <button onClick={() => { 
-                                promptConfirm("Clear Week", `Are you sure you want to clear all shifts for Week ${currentWeek}?`, "Clear Week", () => updateCurrentSchedule({})); 
+
+                            <button onClick={() => {
+                                promptConfirm("Clear Week", `Are you sure you want to clear all shifts for Week ${currentWeek}?`, "Clear Week", () => updateCurrentSchedule({}));
                             }} className="px-3 py-2 border border-red-300 rounded text-red-700 bg-red-50 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400 text-sm font-medium">🧹 Clear Week</button>
-                            
-                            <button onClick={() => { 
-                                promptConfirm("Clear All Schedules", "Are you sure you want to clear ALL schedules across ALL weeks? This cannot be undone.", "Clear All", () => { setSchedules({1:{}}); setCurrentWeek(1); }); 
+
+                            <button onClick={() => {
+                                promptConfirm("Clear All Schedules", "Are you sure you want to clear ALL schedules across ALL weeks? This cannot be undone.", "Clear All", () => { setSchedules({1:{}}); setCurrentWeek(1); });
                             }} className="px-3 py-2 border border-red-300 rounded text-red-700 bg-red-50 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400 text-sm font-medium">🗑️ Clear All Schedules</button>
-                            
+
                             <button onClick={handleAutoAssign} className="px-4 py-2 rounded text-white bg-blue-600 hover:bg-blue-700 text-sm font-bold shadow-sm ml-1">✨ Auto-Assign</button>
                         </div>
                     </div>
@@ -1018,7 +1042,7 @@
                                 <button onClick={() => setActiveGridTab('WC')} className={`px-6 py-3 text-sm font-bold transition-colors ${activeGridTab === 'WC' ? 'border-b-2 border-blue-600 text-blue-700 dark:text-blue-400 bg-white dark:bg-gray-800' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800/50'}`}>Welcome Center</button>
                                 <button onClick={() => setActiveGridTab('CUSTOM')} className={`px-6 py-3 text-sm font-bold transition-colors ${activeGridTab === 'CUSTOM' ? 'border-b-2 border-purple-600 text-purple-700 dark:text-purple-400 bg-white dark:bg-gray-800' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800/50'}`}>Special</button>
                             </div>
-                            
+
                             <div className="flex-1 overflow-auto">
                                 <table className="w-full text-left border-collapse min-w-[900px]">
                                     <thead className="sticky top-0 z-20 shadow-sm">
@@ -1061,8 +1085,8 @@
                                             </button>
                                         </div>
 
-                                        <form onSubmit={(e) => { 
-                                            e.preventDefault(); 
+                                        <form onSubmit={(e) => {
+                                            e.preventDefault();
                                             const trimmedName = (newStudentNameRef.current?.value || "").trim();
                                             if (!trimmedName) {
                                                 promptInfo("Invalid Input", "Please enter a valid student name.");
@@ -1072,8 +1096,8 @@
                                                 promptInfo("Duplicate Name", "A student with this name already exists.");
                                                 return;
                                             }
-                                            setStudents([...students, { id: generateId(), name: trimmedName, role: newStudentRole, unavailable: [] }]); 
-                                            if (newStudentNameRef.current) newStudentNameRef.current.value = ''; 
+                                            setStudents([...students, { id: generateId(), name: trimmedName, role: newStudentRole, unavailable: [], vacations: [] }]);
+                                            if (newStudentNameRef.current) newStudentNameRef.current.value = '';
                                         }} className="flex flex-col gap-2 bg-gray-100 dark:bg-gray-700/30 p-3 rounded border border-gray-300 dark:border-gray-700">
                                             <input type="text" ref={newStudentNameRef} placeholder="Student Name" className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-1.5 rounded text-sm w-full outline-none" />
                                             <div className="flex gap-2">
@@ -1093,10 +1117,14 @@
                                                 const stats = studentStats[s.id];
                                                 const gStats = globalStats[s.id] || { wcShifts: 0, prepShifts: 0 };
                                                 const isUnder = parseFloat(stats.rollingAvg) < 15;
+                                                const hasVacations = (s.vacations || []).length > 0;
                                                 return (
                                                     <div key={s.id} className="flex justify-between items-center p-2 rounded border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
                                                         <div className="flex flex-col">
-                                                            <span className="text-sm font-medium">{s.name}</span>
+                                                            <span className="text-sm font-medium flex items-center gap-1">
+                                                                {s.name}
+                                                                {hasVacations && <span title="Has time off requests" className="text-sky-500 text-[10px]">✈️</span>}
+                                                            </span>
                                                             <div className="flex gap-2 text-[10px] items-center mt-0.5">
                                                                 <span className="text-amber-700 dark:text-amber-400">Week: {stats.currentHours}h</span>
                                                                 <span className={`font-bold px-1 rounded ${isUnder ? 'text-red-600 bg-red-100 dark:bg-red-900/40' : 'text-amber-800 dark:text-amber-300'}`}>
@@ -1106,14 +1134,15 @@
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-3">
-                                                            <button onClick={() => { 
-                                                                setEditingStudentId(s.id); 
-                                                                setEditFormData({ name: s.name, role: s.role }); 
+                                                            <button onClick={() => {
+                                                                setEditingStudentId(s.id);
+                                                                setEditFormData({ name: s.name, role: s.role });
+                                                                setNewVacation({ start: '', end: '' });
                                                             }} className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline">Edit</button>
                                                             <button onClick={() => handleDeleteStudent(s.id)} className="text-xs text-red-500 hover:text-red-700 bg-white dark:bg-gray-800 border border-red-200 dark:border-red-900/50 rounded-full w-5 h-5 flex items-center justify-center" title="Remove Student">✕</button>
                                                         </div>
                                                     </div>
-                                                )
+                                                );
                                             })}
 
                                             <div className="flex justify-between text-xs font-bold text-gray-500 uppercase tracking-wider mt-6 mb-2">
@@ -1123,10 +1152,14 @@
                                                 const stats = studentStats[s.id];
                                                 const warning = stats.currentHours >= settings.maxHours;
                                                 const isUnder = parseFloat(stats.rollingAvg) < 15;
+                                                const hasVacations = (s.vacations || []).length > 0;
                                                 return (
                                                     <div key={s.id} className={`flex justify-between items-center p-2 rounded border ${warning ? 'bg-red-50 border-red-300 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-gray-700/50 border-gray-300 dark:border-gray-600'}`}>
                                                         <div className="flex flex-col">
-                                                            <span className="text-sm font-medium dark:text-gray-200">{s.name}</span>
+                                                            <span className="text-sm font-medium dark:text-gray-200 flex items-center gap-1">
+                                                                {s.name}
+                                                                {hasVacations && <span title="Has time off requests" className="text-sky-500 text-[10px]">✈️</span>}
+                                                            </span>
                                                             <div className="flex gap-2 text-[10px] items-center mt-0.5">
                                                                 <span className={`${warning ? 'text-red-600 font-bold' : 'text-gray-500'}`}>Week: {stats.currentHours}h</span>
                                                                 <span className={`font-bold px-1 rounded ${isUnder ? 'text-amber-600 bg-amber-100 dark:bg-amber-900/40' : 'text-green-600 dark:text-green-400'}`}>
@@ -1135,14 +1168,15 @@
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-3">
-                                                            <button onClick={() => { 
-                                                                setEditingStudentId(s.id); 
-                                                                setEditFormData({ name: s.name, role: s.role }); 
+                                                            <button onClick={() => {
+                                                                setEditingStudentId(s.id);
+                                                                setEditFormData({ name: s.name, role: s.role });
+                                                                setNewVacation({ start: '', end: '' });
                                                             }} className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline">Edit</button>
                                                             <button onClick={() => handleDeleteStudent(s.id)} className="text-xs text-red-500 hover:text-red-700 bg-white dark:bg-gray-800 border border-red-200 dark:border-red-900/50 rounded-full w-5 h-5 flex items-center justify-center" title="Remove Student">✕</button>
                                                         </div>
                                                     </div>
-                                                )
+                                                );
                                             })}
                                         </div>
                                     </div>
@@ -1163,7 +1197,7 @@
                                                         <div className="flex gap-2">
                                                             <div className="flex items-center gap-1">
                                                                 <span className="text-xs text-gray-500">Wkdy:</span>
-                                                                <input 
+                                                                <input
                                                                     type="number" min="0" value={targets[shift.id]?.weekday || 0}
                                                                     onChange={(e) => setTargets({...targets, [shift.id]: {...targets[shift.id], weekday: parseInt(e.target.value, 10) || 0}})}
                                                                     className="w-12 border border-gray-300 dark:border-gray-600 rounded p-1 text-center bg-white dark:bg-gray-700 outline-none"
@@ -1171,7 +1205,7 @@
                                                             </div>
                                                             <div className="flex items-center gap-1">
                                                                 <span className="text-xs text-gray-500">Wknd:</span>
-                                                                <input 
+                                                                <input
                                                                     type="number" min="0" value={targets[shift.id]?.weekend || 0}
                                                                     onChange={(e) => setTargets({...targets, [shift.id]: {...targets[shift.id], weekend: parseInt(e.target.value, 10) || 0}})}
                                                                     className="w-12 border border-gray-300 dark:border-gray-600 rounded p-1 text-center bg-white dark:bg-gray-700 outline-none"
@@ -1341,14 +1375,15 @@
                         </div>
                     </div>
 
+                    {/* Editor Modal */}
                     {editingStudentId && editingStudent && editFormData && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-40 p-4">
                             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl flex flex-col max-h-[90vh] border border-gray-300 dark:border-gray-700">
                                 <div className="p-4 border-b border-gray-300 dark:border-gray-700 flex justify-between items-center bg-gray-100 dark:bg-gray-900 rounded-t-lg">
                                     <h2 className="text-lg font-bold">Edit Profile: {editFormData.name}</h2>
-                                    <button onClick={() => { setEditingStudentId(null); setEditFormData(null); }} className="text-gray-500 hover:text-gray-700">✕</button>
+                                    <button onClick={() => { setEditingStudentId(null); setEditFormData(null); setNewVacation({ start: '', end: '' }); }} className="text-gray-500 hover:text-gray-700">✕</button>
                                 </div>
-                                
+
                                 <div className="p-4 overflow-y-auto space-y-4">
                                     <div className="flex gap-4">
                                         <div className="flex-1">
@@ -1363,10 +1398,11 @@
                                             </select>
                                         </div>
                                         <div className="flex items-end">
-                                             <button onClick={() => handleDeleteStudent(editingStudentId)} className="px-4 py-2 border border-red-300 text-red-600 rounded hover:bg-red-50 dark:border-red-800/50 dark:hover:bg-red-900/30">Delete Student</button>
+                                            <button onClick={() => handleDeleteStudent(editingStudentId)} className="px-4 py-2 border border-red-300 text-red-600 rounded hover:bg-red-50 dark:border-red-800/50 dark:hover:bg-red-900/30">Delete Student</button>
                                         </div>
                                     </div>
 
+                                    {/* Availability Matrix */}
                                     <div>
                                         <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Availability Matrix (Click to block off hours)</label>
                                         <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 p-2 text-sm rounded mb-3 border border-blue-200 dark:border-blue-800/50">
@@ -1418,7 +1454,77 @@
                                             );
                                         })()}
                                     </div>
+
+                                    {/* Time Off Requests */}
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Time Off Requests</label>
+                                        <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 p-2 text-sm rounded mb-3 border border-blue-200 dark:border-blue-800/50">
+                                            Enter date ranges the student is unavailable. They will be blocked from shifts on those specific dates.
+                                        </div>
+
+                                        {(editingStudent.vacations || []).length > 0 && (
+                                            <div className="space-y-1.5 mb-3">
+                                                {(editingStudent.vacations || []).map(v => (
+                                                    <div key={v.id} className="flex justify-between items-center px-3 py-2 rounded border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-sm">
+                                                        <span className="text-gray-700 dark:text-gray-200">
+                                                            ✈️ {v.start === v.end ? v.start : `${v.start} → ${v.end}`}
+                                                        </span>
+                                                        <button
+                                                            onClick={() => {
+                                                                setStudents(prev => prev.map(s =>
+                                                                    s.id === editingStudentId
+                                                                        ? { ...s, vacations: (s.vacations || []).filter(vac => vac.id !== v.id) }
+                                                                        : s
+                                                                ));
+                                                            }}
+                                                            className="text-red-500 hover:text-red-700 bg-white dark:bg-gray-800 border border-red-200 dark:border-red-900/50 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 ml-3"
+                                                            title="Remove"
+                                                        >✕</button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <div className="flex gap-2 items-end bg-gray-100 dark:bg-gray-700/30 p-3 rounded border border-gray-300 dark:border-gray-700">
+                                            <div className="flex-1">
+                                                <label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">Start Date</label>
+                                                <input
+                                                    type="date"
+                                                    value={newVacation.start}
+                                                    onChange={(e) => setNewVacation(prev => ({ ...prev, start: e.target.value }))}
+                                                    className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-1.5 rounded text-sm outline-none text-gray-700 dark:text-gray-300 cursor-pointer"
+                                                />
+                                            </div>
+                                            <div className="flex-1">
+                                                <label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1">End Date</label>
+                                                <input
+                                                    type="date"
+                                                    value={newVacation.end}
+                                                    onChange={(e) => setNewVacation(prev => ({ ...prev, end: e.target.value }))}
+                                                    className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-1.5 rounded text-sm outline-none text-gray-700 dark:text-gray-300 cursor-pointer"
+                                                />
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    const { start, end } = newVacation;
+                                                    if (!start) { promptInfo("Invalid", "Please select a start date."); return; }
+                                                    const resolvedEnd = end || start;
+                                                    if (resolvedEnd < start) { promptInfo("Invalid", "End date cannot be before start date."); return; }
+                                                    setStudents(prev => prev.map(s =>
+                                                        s.id === editingStudentId
+                                                            ? { ...s, vacations: [...(s.vacations || []), { id: generateId(), start, end: resolvedEnd }] }
+                                                            : s
+                                                    ));
+                                                    setNewVacation({ start: '', end: '' });
+                                                }}
+                                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium flex-shrink-0"
+                                            >
+                                                + Add
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
+
                                 <div className="p-4 border-t border-gray-300 dark:border-gray-700 flex justify-end bg-gray-100 dark:bg-gray-900 rounded-b-lg">
                                     <button onClick={handleSaveProfile} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium shadow-sm">Done</button>
                                 </div>
@@ -1426,6 +1532,7 @@
                         </div>
                     )}
 
+                    {/* Confirm Modal */}
                     {confirmDialog && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
                             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-300 dark:border-gray-700 max-w-md w-full">
@@ -1435,8 +1542,8 @@
                                     <button onClick={() => setConfirmDialog(null)} className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors font-medium">
                                         Cancel
                                     </button>
-                                    <button 
-                                        onClick={() => { confirmDialog.actionFn(); setConfirmDialog(null); }} 
+                                    <button
+                                        onClick={() => { confirmDialog.actionFn(); setConfirmDialog(null); }}
                                         className={`px-4 py-2 rounded text-white font-medium shadow-sm transition-colors ${confirmDialog.isDestructive ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
                                     >
                                         {confirmDialog.actionText}
@@ -1446,6 +1553,7 @@
                         </div>
                     )}
 
+                    {/* Info Modal */}
                     {infoDialog && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
                             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-gray-300 dark:border-gray-700 max-w-md w-full">
