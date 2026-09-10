@@ -64,8 +64,18 @@
         const OPENING_SHIFTS = ['COORD_WC_A', 'COORD_PC_A', 'PREP_A', 'WC_A'];
         const CLOSING_SHIFTS = ['WC_C']; 
 
-        // Fix #1: Prevent recreation of empty objects to stabilize useMemo references
         const EMPTY_SCHEDULE = {};
+
+        const getSunday = (dateStr) => {
+            if (!dateStr) return '';
+            const d = new Date(dateStr + 'T00:00:00');
+            const day = d.getDay(); 
+            d.setDate(d.getDate() - day);
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        };
 
         const safeSetItem = (key, value) => {
             try {
@@ -149,7 +159,6 @@
             
             const [newStudentRole, setNewStudentRole] = useState("GENERAL");
             
-            // Fix #4: Use local state for the edit modal to prevent UI input lag
             const [editingStudentId, setEditingStudentId] = useState(null); 
             const [editFormData, setEditFormData] = useState(null);
             
@@ -160,7 +169,6 @@
                 name: '', startHour: 9, endHour: 12, days: [] 
             });
 
-            // Use the constant to prevent memory reference churn
             const schedule = schedules[currentWeek] || EMPTY_SCHEDULE;
 
             const ALL_SHIFTS = useMemo(() => [
@@ -230,7 +238,6 @@
                 );
             };
 
-            // Fix #2: Ghost Shifts on save logic
             const handleSaveProfile = () => {
                 if (!editingStudentId || !editFormData) return;
                 const student = students.find(s => s.id === editingStudentId);
@@ -958,9 +965,24 @@
                                     <input
                                         type="date"
                                         value={weekDates[currentWeek] || ''}
-                                        onChange={(e) => setWeekDates(prev => ({...prev, [currentWeek]: e.target.value}))}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            setWeekDates(prev => ({...prev, [currentWeek]: val ? getSunday(val) : ''}));
+                                        }}
                                         className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 outline-none cursor-pointer"
                                     />
+                                    <button
+                                        onClick={() => {
+                                            const today = new Date();
+                                            const yyyy = today.getFullYear();
+                                            const mm = String(today.getMonth() + 1).padStart(2, '0');
+                                            const dd = String(today.getDate()).padStart(2, '0');
+                                            setWeekDates(prev => ({...prev, [currentWeek]: getSunday(`${yyyy}-${mm}-${dd}`)}));
+                                        }}
+                                        className="px-2.5 py-1 bg-blue-50 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 rounded text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                                    >
+                                        Today
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1289,7 +1311,6 @@
                                                     onClick={() => {
                                                         const name = newCustomShift.name.trim();
                                                         if (!name) { promptInfo("Invalid", "Please enter a shift name."); return; }
-                                                        // Fix #3: Duplicate Custom Shift validation
                                                         if (customShifts.some(s => s.name.toLowerCase() === name.toLowerCase())) {
                                                             promptInfo("Duplicate", "A special shift with this exact name already exists.");
                                                             return;
