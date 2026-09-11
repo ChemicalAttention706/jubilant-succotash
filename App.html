@@ -282,6 +282,7 @@
 
                 setEditingStudentId(null);
                 setEditFormData(null);
+                setNewVacation({ start: '', end: '' });
             };
 
             const handleClearRoster = () => {
@@ -490,7 +491,7 @@
                     });
                 });
                 return result;
-            }, [students, schedule, schedules, studentStats, settings, currentWeek, ALL_SHIFTS]);
+            }, [students, schedule, schedules, studentStats, settings, currentWeek, ALL_SHIFTS, weekDates]);
 
             const handleAutoAssign = () => {
                 let newSchedule = { ...schedule };
